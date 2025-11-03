@@ -7,6 +7,10 @@
     - You must either host your own ComfyUI server,
     - or have access to an existing ComfyUI server address.
 
+<a href="https://glama.ai/mcp/servers/@Overseer66/comfyui-mcp-server">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@Overseer66/comfyui-mcp-server/badge" alt="ComfyUI Server MCP server" />
+</a>
+
 ---
 
 ## 2. Debugging
