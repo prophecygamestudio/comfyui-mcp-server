@@ -106,4 +106,8 @@ async def run_workflow_from_json(json_data: dict) -> Image:
     return extract_first_image(images)
 
 if __name__ == "__main__":
-    mcp.run(transport=os.environ.get("MCP_TRANSPORT", "stdio"))
+    transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    # Map "http" to "sse" for backward compatibility (FastMCP uses "sse" for HTTP-like transports)
+    if transport == "http":
+        transport = "sse"
+    mcp.run(transport=transport)
