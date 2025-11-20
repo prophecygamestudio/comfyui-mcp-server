@@ -12,22 +12,24 @@ load_dotenv()
 mcp = FastMCP("comfyui")
 
 @mcp.tool()
-async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float) -> Any:
+async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> Any:
     """Generate an image from a prompt.
     
     Args:
-        prompt: The prompt to generate the image from.
+        prompt: The prompt to generate the image from.  Uses SDXL prompting style.
         seed: The seed to use for the image generation.
         steps: The number of steps to use for the image generation.
         cfg: The CFG scale to use for the image generation.
         denoise: The denoise strength to use for the image generation.
+        width: The width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
+        height: The height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
     """
     auth = os.environ.get("COMFYUI_AUTHENTICATION")
     comfy = ComfyUI(
         url=f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}',
         authentication=auth
     )
-    images = await comfy.process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise}, return_url=os.environ.get("RETURN_URL", "true").lower() == "true")
+    images = await comfy.process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise, "width": width, "height": height}, return_url=os.environ.get("RETURN_URL", "true").lower() == "true")
     return images
 
 @mcp.tool()

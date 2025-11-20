@@ -106,10 +106,27 @@ class ComfyUI:
             return
 
         for node in prompt.values():
-            if node["class_type"] == "CLIPTextEncode" and "text" in params:
+            node_title = node.get("_meta", {}).get("title", "")
+            
+            # Handle positive prompt - support both new and old parameter names
+            if node_title == "Positive Prompt":
+                if "positive_prompt" in params:
+                    if isinstance(node["inputs"]["text"], str):
+                        node["inputs"]["text"] = params["positive_prompt"]
+                elif "prompt" in params:
+                    # Backward compatibility
+                    if isinstance(node["inputs"]["text"], str):
+                        node["inputs"]["text"] = params["prompt"]
+                elif "text" in params:
+                    # Backward compatibility
+                    if isinstance(node["inputs"]["text"], str):
+                        node["inputs"]["text"] = params["text"]
+            # Handle negative prompt
+            elif node_title == "Negative Prompt" and "negative_prompt" in params:
                 if isinstance(node["inputs"]["text"], str):
-                    node["inputs"]["text"] = params["text"]
-            elif node["class_type"] == "KSampler":
+                    node["inputs"]["text"] = params["negative_prompt"]
+            # Handle sampler parameters
+            elif node_title == "Sampler":
                 if "seed" in params:
                     node["inputs"]["seed"] = params["seed"]
                 if "steps" in params:
@@ -118,6 +135,12 @@ class ComfyUI:
                     node["inputs"]["cfg"] = params["cfg"]
                 if "denoise" in params:
                     node["inputs"]["denoise"] = params["denoise"]
-            
-            elif node["class_type"] == "LoadImage" and "image" in params:
+            # Handle image loading
+            elif node_title == "Load Image" and "image" in params:
                 node["inputs"]["image"] = params["image"]
+            # Handle empty latent image (resolution)
+            elif node_title == "Empty Latent Image":
+                if "width" in params:
+                    node["inputs"]["width"] = params["width"]
+                if "height" in params:
+                    node["inputs"]["height"] = params["height"]

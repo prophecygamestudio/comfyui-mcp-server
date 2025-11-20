@@ -26,12 +26,12 @@
         },
         "class_type": "KSampler",
         "_meta": {
-            "title": "KSampler"
+            "title": "Sampler"
         }
     },
     "4": {
         "inputs": {
-            "ckpt_name": "v1-5-pruned-emaonly-fp16.safetensors"
+            "ckpt_name": "sd_xl_base_10_09vae.safetensors"
         },
         "class_type": "CheckpointLoaderSimple",
         "_meta": {
@@ -40,8 +40,8 @@
     },
     "5": {
         "inputs": {
-            "width": 512,
-            "height": 512,
+            "width": 1024,
+            "height": 1024,
             "batch_size": 1
         },
         "class_type": "EmptyLatentImage",
@@ -59,7 +59,7 @@
         },
         "class_type": "CLIPTextEncode",
         "_meta": {
-            "title": "CLIP Text Encode (Prompt)"
+            "title": "Positive Prompt"
         }
     },
     "7": {
@@ -72,7 +72,7 @@
         },
         "class_type": "CLIPTextEncode",
         "_meta": {
-            "title": "CLIP Text Encode (Prompt)"
+            "title": "Negative Prompt"
         }
     },
     "8": {
