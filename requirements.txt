@@ -1,4 +1,5 @@
 mcp[cli]
+fastmcp
 websocket-client
 python-dotenv
 
