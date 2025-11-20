@@ -1,19 +1,44 @@
 import os
 import json
-import urllib.request
-import urllib.parse
-from typing import Any
 from client.comfyui import ComfyUI
 from mcp.server.fastmcp import FastMCP
+from fastmcp.utilities.types import Image
 from dotenv import load_dotenv
 
 load_dotenv()
 
 mcp = FastMCP("comfyui")
 
+def extract_first_image(images: dict) -> Image:
+    """Extract the first image from a workflow result.
+    
+    Args:
+        images: Dictionary mapping node IDs to lists of image bytes.
+        
+    Returns:
+        Image: The first image as an in-memory Image object.
+        
+    Raises:
+        ValueError: If no images are found in the workflow output.
+    """
+    if not images:
+        raise ValueError("No images were generated")
+    
+    # Get the first image from the first node
+    first_node_id = next(iter(images.keys()))
+    image_bytes_list = images[first_node_id]
+    if not image_bytes_list:
+        raise ValueError("No image data found in the workflow output")
+    
+    # Get the first image bytes
+    image_bytes = image_bytes_list[0]
+    
+    # Return as Image type
+    return Image(data=image_bytes, mimeType="image/png")
+
 @mcp.tool()
-async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> Any:
-    """Generate an image from a prompt.
+async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> Image:
+    """Generate an image from a prompt and return it in memory.
     
     Args:
         prompt: The prompt to generate the image from.  Uses SDXL prompting style.
@@ -23,32 +48,29 @@ async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise:
         denoise: The denoise strength to use for the image generation.
         width: The width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
         height: The height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
+    
+    Returns:
+        Image: The generated image as an in-memory Image object.
     """
     auth = os.environ.get("COMFYUI_AUTHENTICATION")
     comfy = ComfyUI(
         url=f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}',
         authentication=auth
     )
-    images = await comfy.process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise, "width": width, "height": height}, return_url=os.environ.get("RETURN_URL", "true").lower() == "true")
-    return images
-
-@mcp.tool()
-async def download_image(url: str, save_path: str) -> Any:
-    """Download an image from a URL and save it to a file.
+    # Get images as bytes
+    images = await comfy.process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise, "width": width, "height": height})
     
-    Args:
-        url: The URL of the image to download.
-        save_path: The absolute path to save the image to. Must be an absolute path, otherwise the image will be saved relative to the server location.
-    """
-    urllib.request.urlretrieve(url, save_path)
-    return {"success": True}
+    return extract_first_image(images)
 
 @mcp.tool()
-async def run_workflow_from_file(file_path: str) -> Any:
-    """Run a workflow from a file.
+async def run_workflow_from_file(file_path: str) -> Image:
+    """Run a workflow from a file and return the generated image in memory.
     
     Args:
         file_path: The absolute path to the file to run.
+    
+    Returns:
+        Image: The generated image as an in-memory Image object.
     """
     with open(file_path, "r", encoding="utf-8") as f:
         workflow = json.load(f)
@@ -58,15 +80,19 @@ async def run_workflow_from_file(file_path: str) -> Any:
         url=f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}',
         authentication=auth
     )
-    images = await comfy.process_workflow(workflow, {}, return_url=os.environ.get("RETURN_URL", "true").lower() == "true")
-    return images
+    # Get images as bytes
+    images = await comfy.process_workflow(workflow, {})
+    return extract_first_image(images)
 
 @mcp.tool()
-async def run_workflow_from_json(json_data: dict) -> Any:
-    """Run a workflow from a JSON data.
+async def run_workflow_from_json(json_data: dict) -> Image:
+    """Run a workflow from JSON data and return the generated image in memory.
     
     Args:
         json_data: The JSON data to run.
+    
+    Returns:
+        Image: The generated image as an in-memory Image object.
     """
     workflow = json_data
     
@@ -75,8 +101,9 @@ async def run_workflow_from_json(json_data: dict) -> Any:
         url=f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}',
         authentication=auth
     )
-    images = await comfy.process_workflow(workflow, {}, return_url=os.environ.get("RETURN_URL", "true").lower() == "true")
-    return images
+    # Get images as bytes
+    images = await comfy.process_workflow(workflow, {})
+    return extract_first_image(images)
 
 if __name__ == "__main__":
     mcp.run(transport=os.environ.get("MCP_TRANSPORT", "stdio"))

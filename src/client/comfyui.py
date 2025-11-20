@@ -41,7 +41,7 @@ class ComfyUI:
         )
         return json.loads(urllib.request.urlopen(req).read())
     
-    async def process_workflow(self, workflow: Any, params: Dict[str, Any], return_url: bool = False):
+    async def process_workflow(self, workflow: Any, params: Dict[str, Any]):
         if isinstance(workflow, str):
             workflow_path = os.path.join(os.environ.get("WORKFLOW_DIR", "workflows"), f"{workflow}.json")
             if not os.path.exists(workflow_path):
@@ -62,12 +62,12 @@ class ComfyUI:
             ws.connect(ws_url)
 
         try:
-            images = self.get_images(ws, prompt, return_url)
+            images = self.get_images(ws, prompt)
             return images
         finally:
             ws.close()
 
-    def get_images(self, ws, prompt, return_url):
+    def get_images(self, ws, prompt):
         prompt_id = self.queue_prompt(prompt)["prompt_id"]
         output_images = {}
         
@@ -86,18 +86,10 @@ class ComfyUI:
         for node_id in history["outputs"]:
             node_output = history["outputs"][node_id]
             if "images" in node_output:
-                if return_url:
-                    output_images[node_id] = []
-                    for image in node_output["images"]:
-                        data = {"filename": image["filename"], "subfolder": image["subfolder"], "type": image["type"]}
-                        url_values = urllib.parse.urlencode(data)
-                        url = f"{self.url}/view?{url_values}"
-                        output_images[node_id].append(url)
-                else:
-                    output_images[node_id] = [
-                        self.get_image(image["filename"], image["subfolder"], image["type"])
-                        for image in node_output["images"]
-                    ]
+                output_images[node_id] = [
+                    self.get_image(image["filename"], image["subfolder"], image["type"])
+                    for image in node_output["images"]
+                ]
 
         return output_images
 
