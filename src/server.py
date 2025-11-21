@@ -1,6 +1,7 @@
 import os
 import json
 import base64
+import re
 from client.comfyui import ComfyUI
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent
@@ -57,8 +58,8 @@ def extract_first_image(images: dict) -> ImageContent:
     if not base64_data:
         raise ValueError("Failed to encode image as base64")
     
-    # Clean base64 string (remove any whitespace)
-    base64_data = base64_data.strip()
+    # Clean base64 string (remove any whitespace only - don't remove valid base64 chars)
+    base64_data = base64_data.strip().replace('\n', '').replace('\r', '')
     
     # Validate base64 string format by trying to decode it
     try:
@@ -69,7 +70,8 @@ def extract_first_image(images: dict) -> ImageContent:
         raise ValueError(f"Invalid base64 encoding: {str(e)}")
     
     # Return as ImageContent with data URI format
-    # MCP ImageContent expects: "data:image/png;base64,{base64_data}"
+    # MCP ImageContent data field should be a data URI: "data:image/png;base64,{base64_data}"
+    # Note: If MCP inspector works but client validation fails, the issue is with client validation, not server code
     return ImageContent(
         type="image",
         data=f"data:image/png;base64,{base64_data}",
