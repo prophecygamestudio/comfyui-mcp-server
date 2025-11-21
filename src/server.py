@@ -1,22 +1,23 @@
 import os
 import json
+import base64
 from client.comfyui import ComfyUI
 from mcp.server.fastmcp import FastMCP
-from fastmcp.utilities.types import Image
+from mcp.types import ImageContent
 from dotenv import load_dotenv
 
 load_dotenv()
 
 mcp = FastMCP("comfyui")
 
-def extract_first_image(images: dict) -> Image:
+def extract_first_image(images: dict) -> ImageContent:
     """Extract the first image from a workflow result.
     
     Args:
         images: Dictionary mapping node IDs to lists of image bytes.
         
     Returns:
-        Image: The first image as an in-memory Image object.
+        ImageContent: The first image as an MCP ImageContent object.
         
     Raises:
         ValueError: If no images are found in the workflow output.
@@ -33,11 +34,17 @@ def extract_first_image(images: dict) -> Image:
     # Get the first image bytes
     image_bytes = image_bytes_list[0]
     
-    # Return as Image type
-    return Image(data=image_bytes, format="png")
+    # Encode image bytes as base64
+    base64_data = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Return as ImageContent with data URI
+    return ImageContent(
+        data=f"data:image/png;base64,{base64_data}",
+        mimeType="image/png"
+    )
 
 @mcp.tool()
-async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> Image:
+async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> ImageContent:
     """Generate an image from a prompt and return it in memory.
     
     Args:
@@ -50,7 +57,7 @@ async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise:
         height: The height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
     
     Returns:
-        Image: The generated image as an in-memory Image object.
+        ImageContent: The generated image as an MCP ImageContent object.
     """
     auth = os.environ.get("COMFYUI_AUTHENTICATION")
     comfy = ComfyUI(
@@ -63,14 +70,14 @@ async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise:
     return extract_first_image(images)
 
 @mcp.tool()
-async def run_workflow_from_file(file_path: str) -> Image:
+async def run_workflow_from_file(file_path: str) -> ImageContent:
     """Run a workflow from a file and return the generated image in memory.
     
     Args:
         file_path: The absolute path to the file to run.
     
     Returns:
-        Image: The generated image as an in-memory Image object.
+        ImageContent: The generated image as an MCP ImageContent object.
     """
     with open(file_path, "r", encoding="utf-8") as f:
         workflow = json.load(f)
@@ -85,14 +92,14 @@ async def run_workflow_from_file(file_path: str) -> Image:
     return extract_first_image(images)
 
 @mcp.tool()
-async def run_workflow_from_json(json_data: dict) -> Image:
+async def run_workflow_from_json(json_data: dict) -> ImageContent:
     """Run a workflow from JSON data and return the generated image in memory.
     
     Args:
         json_data: The JSON data to run.
     
     Returns:
-        Image: The generated image as an in-memory Image object.
+        ImageContent: The generated image as an MCP ImageContent object.
     """
     workflow = json_data
     
