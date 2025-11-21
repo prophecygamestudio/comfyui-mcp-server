@@ -1,6 +1,7 @@
 import json
 import base64
 from enum import Enum
+from typing import Optional
 
 from mcp.types import ImageContent
 from pydantic import Field
@@ -117,7 +118,7 @@ def extract_first_image(images: dict) -> ImageContent:
 
 
 @mcp.tool()
-async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> ImageContent:
+async def text_to_image(prompt: str = "", seed: int = 0, steps: int = 20, cfg: float = 8.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> ImageContent:
     """Generate an image from a prompt and return it in memory.
     
     Args:
@@ -137,7 +138,7 @@ async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise:
 
 
 @mcp.tool()
-async def run_workflow_from_file(file_path: str) -> ImageContent:
+async def run_workflow_from_file(file_path: str = "") -> ImageContent:
     """Run a workflow from a file and return the generated image in memory.
     
     Args:
@@ -155,7 +156,7 @@ async def run_workflow_from_file(file_path: str) -> ImageContent:
 
 
 @mcp.tool()
-async def run_workflow_from_json(json_data: dict) -> ImageContent:
+async def run_workflow_from_json(json_data: Optional[dict] = None) -> ImageContent:
     """Run a workflow from JSON data and return the generated image in memory.
     
     Args:
@@ -164,6 +165,8 @@ async def run_workflow_from_json(json_data: dict) -> ImageContent:
     Returns:
         ImageContent: The generated image as an MCP ImageContent object.
     """
+    if json_data is None:
+        json_data = {}
     workflow = json_data
     
     images = await get_comfyui_client().process_workflow(workflow, {})
