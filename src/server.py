@@ -69,14 +69,44 @@ def extract_first_image(images: dict) -> ImageContent:
     except Exception as e:
         raise ValueError(f"Invalid base64 encoding: {str(e)}")
     
-    # Return as ImageContent with data URI format
-    # MCP ImageContent data field should be a data URI: "data:image/png;base64,{base64_data}"
-    # Note: If MCP inspector works but client validation fails, the issue is with client validation, not server code
-    return ImageContent(
+    # Debug: Print info about the base64 string (first 100 chars, length, padding)
+    print(f"[DEBUG] Base64 string length: {len(base64_data)}")
+    print(f"[DEBUG] Base64 first 100 chars: {base64_data[:100]}")
+    print(f"[DEBUG] Base64 last 50 chars: {base64_data[-50:]}")
+    print(f"[DEBUG] Base64 padding check: length % 4 = {len(base64_data) % 4}")
+    print(f"[DEBUG] Base64 valid chars check: {all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in base64_data)}")
+    
+    # Try both formats to see which one works
+    # Format 1: Data URI (standard format)
+    data_uri = f"data:image/png;base64,{base64_data}"
+    print(f"[DEBUG] Data URI length: {len(data_uri)}")
+    print(f"[DEBUG] Data URI first 100 chars: {data_uri[:100]}")
+    
+    # Format 2: Just base64 (some clients might expect this)
+    print(f"[DEBUG] Base64-only length: {len(base64_data)}")
+    
+    # Return as ImageContent - try with data URI format first
+    # If client validation fails, it might expect just the base64 string
+    # MCP spec says data field should be a data URI, but client might validate differently
+    # Allow switching format via environment variable for testing
+    use_data_uri = os.environ.get("MCP_IMAGE_DATA_URI", "true").lower() == "true"
+    image_data = data_uri if use_data_uri else base64_data
+    print(f"[DEBUG] Using data URI format: {use_data_uri}")
+    
+    image_content = ImageContent(
         type="image",
-        data=f"data:image/png;base64,{base64_data}",
+        data=image_data,
         mimeType="image/png"
     )
+    
+    # Debug: Print the ImageContent structure
+    print(f"[DEBUG] ImageContent type: {image_content.type}")
+    print(f"[DEBUG] ImageContent mimeType: {image_content.mimeType}")
+    print(f"[DEBUG] ImageContent data length: {len(image_content.data)}")
+    print(f"[DEBUG] ImageContent data starts with: {image_content.data[:50]}")
+    print(f"[DEBUG] ImageContent data ends with: {image_content.data[-50:]}")
+    
+    return image_content
 
 @mcp.tool()
 async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> ImageContent:
