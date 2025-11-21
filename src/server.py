@@ -44,6 +44,12 @@ def extract_first_image(images: dict) -> ImageContent:
     if not image_bytes or len(image_bytes) == 0:
         raise ValueError("Image bytes are empty or invalid")
     
+    # Verify it's a valid PNG (PNG files start with PNG signature: 89 50 4E 47)
+    if len(image_bytes) < 8 or image_bytes[:8] != b'\x89PNG\r\n\x1a\n':
+        # Not a PNG, but continue anyway - might be JPEG or other format
+        # Try to detect format or default to PNG
+        pass
+    
     # Encode image bytes as base64
     base64_data = base64.b64encode(image_bytes).decode('utf-8')
     
@@ -51,7 +57,19 @@ def extract_first_image(images: dict) -> ImageContent:
     if not base64_data:
         raise ValueError("Failed to encode image as base64")
     
-    # Return as ImageContent with data URI
+    # Clean base64 string (remove any whitespace)
+    base64_data = base64_data.strip()
+    
+    # Validate base64 string format by trying to decode it
+    try:
+        decoded = base64.b64decode(base64_data, validate=True)
+        if len(decoded) != len(image_bytes):
+            raise ValueError("Base64 decode length mismatch")
+    except Exception as e:
+        raise ValueError(f"Invalid base64 encoding: {str(e)}")
+    
+    # Return as ImageContent with data URI format
+    # MCP ImageContent expects: "data:image/png;base64,{base64_data}"
     return ImageContent(
         type="image",
         data=f"data:image/png;base64,{base64_data}",
@@ -75,12 +93,16 @@ async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise:
         ImageContent: The generated image as an MCP ImageContent object.
     """
     auth = os.environ.get("COMFYUI_AUTHENTICATION")
+    comfy_url = f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}'
     comfy = ComfyUI(
-        url=f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}',
+        url=comfy_url,
         authentication=auth
     )
     # Get images as bytes
-    images = await comfy.process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise, "width": width, "height": height})
+    try:
+        images = await comfy.process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise, "width": width, "height": height})
+    except Exception as e:
+        raise Exception(f"Failed to generate image from ComfyUI at {comfy_url}. Make sure ComfyUI server is running and accessible. Error: {str(e)}")
     
     return extract_first_image(images)
 
