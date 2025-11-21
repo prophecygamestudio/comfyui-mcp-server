@@ -12,8 +12,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 
 RUN uv venv .venv && uv pip install -r pyproject.toml
 
-EXPOSE 8000
+EXPOSE 3000
 
-ENV MCP_TRANSPORT=sse
+ENV MCP_TRANSPORT=stdio
 
 ENTRYPOINT ["uv", "run", "src/server.py"]

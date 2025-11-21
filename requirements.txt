@@ -1,5 +1,5 @@
-mcp[cli]
 fastmcp
+pydantic
+pydantic-settings
 websocket-client
 python-dotenv
-

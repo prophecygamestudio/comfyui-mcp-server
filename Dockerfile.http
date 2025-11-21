@@ -12,6 +12,8 @@ ENV PATH="/root/.local/bin:${PATH}"
 
 RUN uv venv .venv && uv pip install -r pyproject.toml
 
-EXPOSE 3000
+EXPOSE 8000
 
-ENTRYPOINT ["uv", "run", "--with", "mcp", "mcp", "run", "src/server.py:mcp"]
+ENV MCP_TRANSPORT=http
+
+ENTRYPOINT ["uv", "run", "src/server.py"]

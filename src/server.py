@@ -1,21 +1,53 @@
-import os
 import json
 import base64
-import re
-from client.comfyui import ComfyUI
-from mcp.server.fastmcp import FastMCP
+from enum import Enum
+
 from mcp.types import ImageContent
-from dotenv import load_dotenv
+from pydantic import Field
 
-load_dotenv()
+from client.comfyui import ComfyUI
+from fastmcp import FastMCP
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Configure host and port for HTTP-based transports (SSE, streamable-http, etc.)
-# These are read at module level so they can be used during FastMCP initialization
-host = os.environ.get("MCP_HOST", "0.0.0.0")
-port = int(os.environ.get("MCP_PORT", "8000"))
 
-# Initialize FastMCP with host and port (will be used for HTTP-based transports)
-mcp = FastMCP("comfyui", host=host, port=port)
+dotenv_file = ".env"
+
+
+class MCPTransport(str, Enum):
+    stdio = "stdio"
+    sse = "sse"
+    http = "http"
+
+
+class ServerSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="mcp_", env_file=dotenv_file, extra='ignore')
+
+    host: str = "0.0.0.0"
+    port: int = 8000
+    use_image_data_uri: bool = False
+    transport: MCPTransport = MCPTransport.http
+
+
+settings = ServerSettings()
+mcp = FastMCP("comfyui", host=settings.host, port=settings.port, stateless_http=True)
+
+
+class ComfyUISettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="comfyui_", env_file=dotenv_file, extra='ignore')
+
+    host: str = Field("localhost", description="The hostname or IP address of the ComfyUI server.")
+    port: int = Field(8188, description="The port number of the ComfyUI server.")
+    authentication: str | None = Field(None, description="The authentication token for the ComfyUI server, if required.")
+
+
+def get_comfyui_client() -> ComfyUI:
+    """Create and return a ComfyUI client based on environment variables."""
+    comfy_settings = ComfyUISettings()
+    return ComfyUI(
+        url=f'http://{comfy_settings.host}:{comfy_settings.port}',
+        authentication=comfy_settings.authentication,
+    )
+
 
 def extract_first_image(images: dict) -> ImageContent:
     """Extract the first image from a workflow result.
@@ -69,10 +101,8 @@ def extract_first_image(images: dict) -> ImageContent:
     except Exception as e:
         raise ValueError(f"Invalid base64 encoding: {str(e)}")
     
-    # Determine format based on environment variable
     # Some MCP clients expect just the base64 string, not the full data URI
-    use_data_uri = os.environ.get("MCP_IMAGE_DATA_URI", "false").lower() == "true"
-    if use_data_uri:
+    if settings.use_image_data_uri:
         image_data = f"data:image/png;base64,{base64_data}"
     else:
         image_data = base64_data
@@ -84,6 +114,7 @@ def extract_first_image(images: dict) -> ImageContent:
     )
     
     return image_content
+
 
 @mcp.tool()
 async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> ImageContent:
@@ -101,19 +132,9 @@ async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise:
     Returns:
         ImageContent: The generated image as an MCP ImageContent object.
     """
-    auth = os.environ.get("COMFYUI_AUTHENTICATION")
-    comfy_url = f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}'
-    comfy = ComfyUI(
-        url=comfy_url,
-        authentication=auth
-    )
-    # Get images as bytes
-    try:
-        images = await comfy.process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise, "width": width, "height": height})
-    except Exception as e:
-        raise Exception(f"Failed to generate image from ComfyUI at {comfy_url}. Make sure ComfyUI server is running and accessible. Error: {str(e)}")
-    
+    images = await get_comfyui_client().process_workflow("text_to_image", {"prompt": prompt, "seed": seed, "steps": steps, "cfg": cfg, "denoise": denoise, "width": width, "height": height})
     return extract_first_image(images)
+
 
 @mcp.tool()
 async def run_workflow_from_file(file_path: str) -> ImageContent:
@@ -127,15 +148,11 @@ async def run_workflow_from_file(file_path: str) -> ImageContent:
     """
     with open(file_path, "r", encoding="utf-8") as f:
         workflow = json.load(f)
-    
-    auth = os.environ.get("COMFYUI_AUTHENTICATION")
-    comfy = ComfyUI(
-        url=f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}',
-        authentication=auth
-    )
+
     # Get images as bytes
-    images = await comfy.process_workflow(workflow, {})
+    images = await get_comfyui_client().process_workflow(workflow, {})
     return extract_first_image(images)
+
 
 @mcp.tool()
 async def run_workflow_from_json(json_data: dict) -> ImageContent:
@@ -149,20 +166,9 @@ async def run_workflow_from_json(json_data: dict) -> ImageContent:
     """
     workflow = json_data
     
-    auth = os.environ.get("COMFYUI_AUTHENTICATION")
-    comfy = ComfyUI(
-        url=f'http://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}',
-        authentication=auth
-    )
-    # Get images as bytes
-    images = await comfy.process_workflow(workflow, {})
+    images = await get_comfyui_client().process_workflow(workflow, {})
     return extract_first_image(images)
 
+
 if __name__ == "__main__":
-    transport = os.environ.get("MCP_TRANSPORT", "stdio")
-    # Map "http" to "sse" for backward compatibility (FastMCP uses "sse" for HTTP-like transports)
-    if transport == "http":
-        transport = "sse"
-    
-    # Run with the configured transport (host and port are set during FastMCP initialization)
-    mcp.run(transport=transport)
+    mcp.run(transport=settings.transport.value)
