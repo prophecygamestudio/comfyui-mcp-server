@@ -34,7 +34,7 @@ def extract_first_image(images: dict) -> Image:
     image_bytes = image_bytes_list[0]
     
     # Return as Image type
-    return Image(data=image_bytes, mimeType="image/png")
+    return Image(data=image_bytes, format="png")
 
 @mcp.tool()
 async def text_to_image(prompt: str, seed: int, steps: int, cfg: float, denoise: float, width: int = 1024, height: int = 1024) -> Image:
