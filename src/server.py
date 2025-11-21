@@ -85,13 +85,15 @@ def extract_first_image(images: dict) -> ImageContent:
     # Format 2: Just base64 (some clients might expect this)
     print(f"[DEBUG] Base64-only length: {len(base64_data)}")
     
-    # Return as ImageContent - try with data URI format first
-    # If client validation fails, it might expect just the base64 string
-    # MCP spec says data field should be a data URI, but client might validate differently
-    # Allow switching format via environment variable for testing
-    use_data_uri = os.environ.get("MCP_IMAGE_DATA_URI", "true").lower() == "true"
+    # Return as ImageContent
+    # Based on the error path ["content", 0, "data"], the client is validating the data field
+    # Since MCP inspector works but this client doesn't, try just base64 string without data URI
+    # Some MCP clients might expect just the base64 string, not the full data URI
+    use_data_uri = os.environ.get("MCP_IMAGE_DATA_URI", "false").lower() == "true"
     image_data = data_uri if use_data_uri else base64_data
     print(f"[DEBUG] Using data URI format: {use_data_uri}")
+    print(f"[DEBUG] Final image_data length: {len(image_data)}")
+    print(f"[DEBUG] Final image_data starts with: {image_data[:50]}")
     
     image_content = ImageContent(
         type="image",
@@ -105,6 +107,18 @@ def extract_first_image(images: dict) -> ImageContent:
     print(f"[DEBUG] ImageContent data length: {len(image_content.data)}")
     print(f"[DEBUG] ImageContent data starts with: {image_content.data[:50]}")
     print(f"[DEBUG] ImageContent data ends with: {image_content.data[-50:]}")
+    
+    # Debug: Try to serialize to see the JSON structure
+    try:
+        # Try to get the dict representation
+        if hasattr(image_content, 'model_dump'):
+            content_dict = image_content.model_dump()
+            print(f"[DEBUG] ImageContent as dict: {json.dumps({k: (v[:100] + '...' if isinstance(v, str) and len(v) > 100 else v) for k, v in content_dict.items()}, indent=2)}")
+        elif hasattr(image_content, 'dict'):
+            content_dict = image_content.dict()
+            print(f"[DEBUG] ImageContent as dict: {json.dumps({k: (v[:100] + '...' if isinstance(v, str) and len(v) > 100 else v) for k, v in content_dict.items()}, indent=2)}")
+    except Exception as e:
+        print(f"[DEBUG] Could not serialize ImageContent: {e}")
     
     return image_content
 
