@@ -69,56 +69,19 @@ def extract_first_image(images: dict) -> ImageContent:
     except Exception as e:
         raise ValueError(f"Invalid base64 encoding: {str(e)}")
     
-    # Debug: Print info about the base64 string (first 100 chars, length, padding)
-    print(f"[DEBUG] Base64 string length: {len(base64_data)}")
-    print(f"[DEBUG] Base64 first 100 chars: {base64_data[:100]}")
-    print(f"[DEBUG] Base64 last 50 chars: {base64_data[-50:]}")
-    print(f"[DEBUG] Base64 padding check: length % 4 = {len(base64_data) % 4}")
-    print(f"[DEBUG] Base64 valid chars check: {all(c in 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=' for c in base64_data)}")
-    
-    # Try both formats to see which one works
-    # Format 1: Data URI (standard format)
-    data_uri = f"data:image/png;base64,{base64_data}"
-    print(f"[DEBUG] Data URI length: {len(data_uri)}")
-    print(f"[DEBUG] Data URI first 100 chars: {data_uri[:100]}")
-    
-    # Format 2: Just base64 (some clients might expect this)
-    print(f"[DEBUG] Base64-only length: {len(base64_data)}")
-    
-    # Return as ImageContent
-    # Based on the error path ["content", 0, "data"], the client is validating the data field
-    # Since MCP inspector works but this client doesn't, try just base64 string without data URI
-    # Some MCP clients might expect just the base64 string, not the full data URI
+    # Determine format based on environment variable
+    # Some MCP clients expect just the base64 string, not the full data URI
     use_data_uri = os.environ.get("MCP_IMAGE_DATA_URI", "false").lower() == "true"
-    image_data = data_uri if use_data_uri else base64_data
-    print(f"[DEBUG] Using data URI format: {use_data_uri}")
-    print(f"[DEBUG] Final image_data length: {len(image_data)}")
-    print(f"[DEBUG] Final image_data starts with: {image_data[:50]}")
+    if use_data_uri:
+        image_data = f"data:image/png;base64,{base64_data}"
+    else:
+        image_data = base64_data
     
     image_content = ImageContent(
         type="image",
         data=image_data,
         mimeType="image/png"
     )
-    
-    # Debug: Print the ImageContent structure
-    print(f"[DEBUG] ImageContent type: {image_content.type}")
-    print(f"[DEBUG] ImageContent mimeType: {image_content.mimeType}")
-    print(f"[DEBUG] ImageContent data length: {len(image_content.data)}")
-    print(f"[DEBUG] ImageContent data starts with: {image_content.data[:50]}")
-    print(f"[DEBUG] ImageContent data ends with: {image_content.data[-50:]}")
-    
-    # Debug: Try to serialize to see the JSON structure
-    try:
-        # Try to get the dict representation
-        if hasattr(image_content, 'model_dump'):
-            content_dict = image_content.model_dump()
-            print(f"[DEBUG] ImageContent as dict: {json.dumps({k: (v[:100] + '...' if isinstance(v, str) and len(v) > 100 else v) for k, v in content_dict.items()}, indent=2)}")
-        elif hasattr(image_content, 'dict'):
-            content_dict = image_content.dict()
-            print(f"[DEBUG] ImageContent as dict: {json.dumps({k: (v[:100] + '...' if isinstance(v, str) and len(v) > 100 else v) for k, v in content_dict.items()}, indent=2)}")
-    except Exception as e:
-        print(f"[DEBUG] Could not serialize ImageContent: {e}")
     
     return image_content
 
