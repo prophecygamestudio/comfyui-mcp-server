@@ -40,8 +40,16 @@ def extract_first_image(images: dict) -> ImageContent:
     # Get the first image bytes
     image_bytes = image_bytes_list[0]
     
+    # Validate image bytes
+    if not image_bytes or len(image_bytes) == 0:
+        raise ValueError("Image bytes are empty or invalid")
+    
     # Encode image bytes as base64
     base64_data = base64.b64encode(image_bytes).decode('utf-8')
+    
+    # Validate base64 encoding
+    if not base64_data:
+        raise ValueError("Failed to encode image as base64")
     
     # Return as ImageContent with data URI
     return ImageContent(
