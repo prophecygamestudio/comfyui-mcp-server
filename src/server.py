@@ -8,7 +8,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-mcp = FastMCP("comfyui")
+# Configure host and port for HTTP-based transports (SSE, streamable-http, etc.)
+# These are read at module level so they can be used during FastMCP initialization
+host = os.environ.get("MCP_HOST", "0.0.0.0")
+port = int(os.environ.get("MCP_PORT", "8000"))
+
+# Initialize FastMCP with host and port (will be used for HTTP-based transports)
+mcp = FastMCP("comfyui", host=host, port=port)
 
 def extract_first_image(images: dict) -> ImageContent:
     """Extract the first image from a workflow result.
@@ -119,12 +125,5 @@ if __name__ == "__main__":
     if transport == "http":
         transport = "sse"
     
-    # Configure host and port for HTTP-based transports (SSE, streamable-http, etc.)
-    host = os.environ.get("MCP_HOST", "0.0.0.0")
-    port = int(os.environ.get("MCP_PORT", "8000"))
-    
-    # Pass host and port for HTTP-based transports (not needed for stdio)
-    if transport != "stdio":
-        mcp.run(transport=transport, host=host, port=port)
-    else:
-        mcp.run(transport=transport)
+    # Run with the configured transport (host and port are set during FastMCP initialization)
+    mcp.run(transport=transport)
