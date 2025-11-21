@@ -1,4 +1,5 @@
 import os
+
 import websocket
 import json
 import uuid
@@ -6,27 +7,40 @@ import urllib.parse
 import urllib.request
 from typing import Dict, Any
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class ComfyUISettings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="comfyui_", env_file='.env', extra='ignore')
+
+    host: str = "localhost"
+    port: int = 8188
+    authentication: str | None = None
+    workflow_dir: str = "workflows"
+
+
 class ComfyUI:
-    def __init__(self, url: str, authentication: str = None):
-        self.url = url
-        self.authentication = authentication
+    def __init__(self):
+        self.settings = ComfyUISettings()
+        self.http_url = f'http://{self.settings.host}:{self.settings.port}'
         self.client_id = str(uuid.uuid4())
+        self.ws_url = f'ws://{self.settings.host}:{self.settings.port}/ws?clientId={self.client_id}'
         self.headers = {
             "Content-Type": "application/json"
         }
-        if authentication:
-            self.headers["Authorization"] = authentication
+        if self.settings.authentication:
+            self.headers["Authorization"] = self.settings.authentication
 
     def get_image(self, filename, subfolder, folder_type):
         data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
         url_values = urllib.parse.urlencode(data)
-        url = f"{self.url}/view?{url_values}"
+        url = f"{self.http_url}/view?{url_values}"
         req = urllib.request.Request(url, headers=self.headers)
         with urllib.request.urlopen(req) as response:
             return response.read()
 
     def get_history(self, prompt_id):
-        url = f"{self.url}/history/{prompt_id}"
+        url = f"{self.http_url}/history/{prompt_id}"
         req = urllib.request.Request(url, headers=self.headers)
         with urllib.request.urlopen(req) as response:
             return json.loads(response.read())
@@ -34,16 +48,15 @@ class ComfyUI:
     def queue_prompt(self, prompt):
         p = {"prompt": prompt, "client_id": self.client_id}
         data = json.dumps(p).encode("utf-8")
-        req = urllib.request.Request(
-            f"{self.url}/prompt",
-            headers=self.headers,
-            data=data
-        )
-        return json.loads(urllib.request.urlopen(req).read())
-    
+        req = urllib.request.Request(f"{self.http_url}/prompt", headers=self.headers, data=data)
+        with urllib.request.urlopen(req) as resp:
+            resp_data = resp.read()
+            resp_json = json.loads(resp_data)
+            return resp_json
+
     async def process_workflow(self, workflow: Any, params: Dict[str, Any]):
         if isinstance(workflow, str):
-            workflow_path = os.path.join(os.environ.get("WORKFLOW_DIR", "workflows"), f"{workflow}.json")
+            workflow_path = os.path.join(self.settings.workflow_dir, f"{workflow}.json")
             if not os.path.exists(workflow_path):
                 raise Exception(f"Workflow {workflow} not found")
             with open(workflow_path, "r", encoding='utf-8') as f:
@@ -54,12 +67,10 @@ class ComfyUI:
         self.update_workflow_params(prompt, params)
 
         ws = websocket.WebSocket()
-        ws_url = f"ws://{os.environ.get("COMFYUI_HOST", "localhost")}:{os.environ.get("COMFYUI_PORT", 8188)}/ws?clientId={self.client_id}"
-        
-        if self.authentication:
-            ws.connect(ws_url, header=[f"Authorization: {self.authentication}"])
+        if self.settings.authentication:
+            ws.connect(self.ws_url, header=[f"Authorization: {self.settings.authentication}"])
         else:
-            ws.connect(ws_url)
+            ws.connect(self.ws_url)
 
         try:
             images = self.get_images(ws, prompt)
