@@ -118,4 +118,13 @@ if __name__ == "__main__":
     # Map "http" to "sse" for backward compatibility (FastMCP uses "sse" for HTTP-like transports)
     if transport == "http":
         transport = "sse"
-    mcp.run(transport=transport)
+    
+    # Configure host and port for HTTP-based transports (SSE, streamable-http, etc.)
+    host = os.environ.get("MCP_HOST", "0.0.0.0")
+    port = int(os.environ.get("MCP_PORT", "8000"))
+    
+    # Pass host and port for HTTP-based transports (not needed for stdio)
+    if transport != "stdio":
+        mcp.run(transport=transport, host=host, port=port)
+    else:
+        mcp.run(transport=transport)
