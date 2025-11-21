@@ -39,6 +39,7 @@ def extract_first_image(images: dict) -> ImageContent:
     
     # Return as ImageContent with data URI
     return ImageContent(
+        type="image",
         data=f"data:image/png;base64,{base64_data}",
         mimeType="image/png"
     )
