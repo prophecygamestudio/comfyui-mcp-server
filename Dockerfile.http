@@ -10,10 +10,11 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
 ENV PATH="/root/.local/bin:${PATH}"
 
-RUN uv venv .venv && uv pip install -r pyproject.toml
+RUN uv venv .venv
+RUN uv sync --frozen
 
 EXPOSE 8000
 
 ENV MCP_TRANSPORT=http
 
-ENTRYPOINT ["uv", "run", "src/server.py"]
+ENTRYPOINT ["uv", "run", "--frozen", "src/server.py"]
