@@ -84,17 +84,16 @@ mcp = FastMCP("comfyui", host=settings.host, port=settings.port, stateless_http=
 logger.info("Initializing ComfyUI client...")
 comfyui_client = ComfyUI()
 
-
-def extract_images(images: dict) -> list[Image]:
-    """Extract the images from a workflow result.
+def extract_image_urls(images: dict) -> list[str]:
+    """Extract the image URLs from a workflow result.
 
     Args:
-        images: Dictionary mapping node IDs to lists of image bytes.
+        images: Dictionary mapping node IDs to lists of image URLs.
 
     Returns:
-        list[Image]: The images as an MCP Image objects.
+        list[str]: List of ComfyUI download URLs for the generated images.
     """
-    logger.info(f"extract_images called with {len(images)} node(s) containing images")
+    logger.info(f"extract_image_urls called with {len(images)} node(s) containing images")
     
     if not images:
         logger.error("No images were generated - images dict is empty")
@@ -103,73 +102,31 @@ def extract_images(images: dict) -> list[Image]:
     result = []
     total_images = 0
     
-    for node_id, resp_image_list in images.items():
-        logger.info(f"Processing node {node_id} with {len(resp_image_list) if resp_image_list else 0} image(s)")
+    for node_id, url_list in images.items():
+        logger.info(f"Processing node {node_id} with {len(url_list) if url_list else 0} URL(s)")
         
-        if not resp_image_list:
-            logger.warning(f"Node {node_id} has empty image list, skipping")
+        if not url_list:
+            logger.warning(f"Node {node_id} has empty URL list, skipping")
             continue
 
-        for idx, image_bytes in enumerate(resp_image_list):
+        for idx, url in enumerate(url_list):
             total_images += 1
-            logger.info(f"Processing image {total_images} from node {node_id} (index {idx}): {len(image_bytes)} bytes")
+            logger.info(f"Processing URL {total_images} from node {node_id} (index {idx}): {url}")
             
-            # Validate image bytes
-            if not image_bytes or len(image_bytes) == 0:
-                logger.error(f"Image {total_images} from node {node_id} is empty or invalid")
-                raise ValueError("Image bytes are empty or invalid")
-
-            # Detect image format
-            image_format = "png"
-            if len(image_bytes) >= 8:
-                if image_bytes[:8] == b'\x89PNG\r\n\x1a\n':
-                    image_format = "png"
-                    logger.debug(f"Image {total_images}: Detected PNG format (signature match)")
-                elif image_bytes[:2] == b'\xff\xd8':
-                    image_format = "jpeg"
-                    logger.debug(f"Image {total_images}: Detected JPEG format")
-                elif image_bytes[:4] == b'RIFF' and image_bytes[8:12] == b'WEBP':
-                    image_format = "webp"
-                    logger.debug(f"Image {total_images}: Detected WebP format")
-                else:
-                    logger.warning(f"Image {total_images}: Unknown format, defaulting to PNG. First 8 bytes: {image_bytes[:8].hex()}")
+            # Validate URL
+            if not url or not isinstance(url, str):
+                logger.error(f"URL {total_images} from node {node_id} is empty or invalid")
+                raise ValueError("Image URL is empty or invalid")
             
-            # FastMCP Image expects raw image bytes (not base64-encoded)
-            # FastMCP handles base64 encoding internally when serializing to JSON
-            logger.info(f"Image {total_images}: Using raw image bytes, size: {len(image_bytes)} bytes")
-            
-            # Verify image bytes are actually bytes
-            if not isinstance(image_bytes, bytes):
-                logger.error(f"Image {total_images}: image_bytes is not bytes, type: {type(image_bytes)}")
-                raise ValueError(f"Image data must be bytes, got type {type(image_bytes)}")
-            
-            mcp_image = Image(data=image_bytes, format=image_format)
-            logger.info(f"Image {total_images}: Created MCP Image object with format='{image_format}', data type={type(mcp_image.data)}, data length={len(mcp_image.data) if hasattr(mcp_image.data, '__len__') else 'unknown'}")
-            
-            result.append(mcp_image)
+            result.append(url)
     
-    logger.info(f"extract_images: Successfully extracted {len(result)} image(s) from {total_images} total images")
+    logger.info(f"extract_image_urls: Successfully extracted {len(result)} URL(s) from {total_images} total images")
     return result
 
 
-def extract_first_image(images: dict) -> Image:
-    """Extract the first image from a workflow result.
-    
-    Args:
-        images: Dictionary mapping node IDs to lists of image bytes.
-    
-    Returns:
-        Image: The first image as an MCP Image object.
-    """
-    all_images = extract_images(images)
-    if not all_images:
-        raise ValueError("No images were generated")
-    return all_images[0]
-
-
 @mcp.tool()
-async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 8.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> Image:
-    """Generate an image from a prompt and return it in memory.
+async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 8.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> list[str]:
+    """Generate an image from a prompt. Returns ComfyUI download links for the generated images.
     
     Args:
         prompt: The prompt to generate the image from.  Uses natural language prompt.
@@ -181,7 +138,7 @@ async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Opt
         height: The height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
     
     Returns:
-        Image: The generated image as an MCP Image object.
+        list[str]: List of ComfyUI download URLs for the generated images. Files can be downloaded from these links.
     """
     logger.info(f"text_to_image called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, width={width}, height={height}")
     
@@ -192,25 +149,22 @@ async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Opt
         params["steps"] = steps
     
     logger.info(f"Processing workflow 'text_to_image' with params: {params}")
-    images = await comfyui_client.process_workflow("text_to_image", params)
+    images = await comfyui_client.process_workflow("text_to_image", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(images)} node(s)")
     
-    extracted = extract_images(images)
-    logger.info(f"text_to_image: Extracted {len(extracted)} MCP Image object(s), returning first image")
+    extracted = extract_image_urls(images)
+    logger.info(f"text_to_image: Extracted {len(extracted)} URL(s)")
     
     if not extracted:
         raise ValueError("No images were generated")
     
-    img = extracted[0]
-    img_data_len = len(img.data) if hasattr(img.data, '__len__') else 'unknown'
-    logger.info(f"Returning image: format='{img._format}', data type={type(img.data)}, data length={img_data_len}")
-    
-    return img
+    logger.info(f"Returning {len(extracted)} download URL(s)")
+    return extracted
 
 
 @mcp.tool()
-async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 7.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> Image:
-    """Generate a placeholder image from a prompt and return it in memory. Optimized for quick placeholder generation.
+async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 7.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> list[str]:
+    """Generate a placeholder image from a prompt. Optimized for quick placeholder generation. Returns ComfyUI download links for the generated images.
     
     Args:
         prompt: The prompt to generate the placeholder image from. Uses comma separated tags such as "dog, walking, sunset"
@@ -222,7 +176,7 @@ async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None
         height: The height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
     
     Returns:
-        Image: The generated placeholder image as an MCP Image object.
+        list[str]: List of ComfyUI download URLs for the generated placeholder images. Files can be downloaded from these links.
     """
     logger.info(f"text_to_image_placeholder called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, width={width}, height={height}")
     
@@ -233,25 +187,22 @@ async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None
         params["steps"] = steps
     
     logger.info(f"Processing workflow 'text_to_image_placeholder' with params: {params}")
-    workflow_images = await comfyui_client.process_workflow("text_to_image_placeholder", params)
+    workflow_images = await comfyui_client.process_workflow("text_to_image_placeholder", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
     
-    extracted = extract_images(workflow_images)
-    logger.info(f"text_to_image_placeholder: Extracted {len(extracted)} MCP Image object(s), returning first image")
+    extracted = extract_image_urls(workflow_images)
+    logger.info(f"text_to_image_placeholder: Extracted {len(extracted)} URL(s)")
     
     if not extracted:
         raise ValueError("No images were generated")
     
-    img = extracted[0]
-    img_data_len = len(img.data) if hasattr(img.data, '__len__') else 'unknown'
-    logger.info(f"Returning image: format='{img._format}', data type={type(img.data)}, data length={img_data_len}")
-    
-    return img
+    logger.info(f"Returning {len(extracted)} download URL(s)")
+    return extracted
 
 
 @mcp.tool()
-async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 8.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> Image:
-    """Edit one or more images using a prompt and return the edited images in memory.
+async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 8.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> list[str]:
+    """Edit one or more images using a prompt. Returns ComfyUI download links for the edited images.
     
     Args:
         images: List of images to edit. Each image should have base64-encoded data and format.
@@ -264,7 +215,7 @@ async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[
         height: The target height of the generated image in pixels.
     
     Returns:
-        Image: The edited image as an MCP Image object.
+        list[str]: List of ComfyUI download URLs for the edited images. Files can be downloaded from these links.
     """
     if not images:
         raise ValueError("At least one image must be provided")
@@ -296,31 +247,28 @@ async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[
     if steps is not None:
         params["steps"] = steps
     logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', cfg={cfg}, width={width}, height={height}, {len(upload_results)} uploaded image(s)")
-    workflow_images = await comfyui_client.process_workflow("edit_image", params)
+    workflow_images = await comfyui_client.process_workflow("edit_image", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
     
-    extracted = extract_images(workflow_images)
-    logger.info(f"edit_image: Extracted {len(extracted)} MCP Image object(s), returning first image")
+    extracted = extract_image_urls(workflow_images)
+    logger.info(f"edit_image: Extracted {len(extracted)} URL(s)")
     
     if not extracted:
         raise ValueError("No images were generated")
     
-    img = extracted[0]
-    img_data_len = len(img.data) if hasattr(img.data, '__len__') else 'unknown'
-    logger.info(f"Returning image: format='{img._format}', data type={type(img.data)}, data length={img_data_len}")
-    
-    return img
+    logger.info(f"Returning {len(extracted)} download URL(s)")
+    return extracted
 
 
 @mcp.tool()
-async def run_workflow_from_file(file_path: str = "") -> Image:
-    """Run a workflow from a file and return the generated image in memory.
+async def run_workflow_from_file(file_path: str = "") -> list[str]:
+    """Run a workflow from a file. Returns ComfyUI download links for the generated images.
     
     Args:
         file_path: The absolute path to the file to run.
     
     Returns:
-        Image: The generated image as an MCP Image object.
+        list[str]: List of ComfyUI download URLs for the generated images. Files can be downloaded from these links.
     """
     logger.info(f"run_workflow_from_file called with file_path='{file_path}'")
     
@@ -328,32 +276,28 @@ async def run_workflow_from_file(file_path: str = "") -> Image:
         workflow = json.load(f)
 
     logger.info(f"Loaded workflow from file, processing...")
-    # Get images as bytes
-    images = await comfyui_client.process_workflow(workflow, {})
+    images = await comfyui_client.process_workflow(workflow, {}, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(images)} node(s)")
     
-    extracted = extract_images(images)
-    logger.info(f"run_workflow_from_file: Extracted {len(extracted)} MCP Image object(s), returning first image")
+    extracted = extract_image_urls(images)
+    logger.info(f"run_workflow_from_file: Extracted {len(extracted)} URL(s)")
     
     if not extracted:
         raise ValueError("No images were generated")
     
-    img = extracted[0]
-    img_data_len = len(img.data) if hasattr(img.data, '__len__') else 'unknown'
-    logger.info(f"Returning image: format='{img._format}', data type={type(img.data)}, data length={img_data_len}")
-    
-    return img
+    logger.info(f"Returning {len(extracted)} download URL(s)")
+    return extracted
 
 
 @mcp.tool()
-async def run_workflow_from_json(json_data: Optional[dict] = None) -> Image:
-    """Run a workflow from JSON data and return the generated image in memory.
+async def run_workflow_from_json(json_data: Optional[dict] = None) -> list[str]:
+    """Run a workflow from JSON data. Returns ComfyUI download links for the generated images.
     
     Args:
         json_data: The JSON workflow to run.
     
     Returns:
-        Image: The generated image as an MCP Image object.
+        list[str]: List of ComfyUI download URLs for the generated images. Files can be downloaded from these links.
     """
     logger.info(f"run_workflow_from_json called with json_data={'provided' if json_data else 'None'}")
     
@@ -361,20 +305,17 @@ async def run_workflow_from_json(json_data: Optional[dict] = None) -> Image:
         json_data = {}
 
     logger.info(f"Processing workflow from JSON...")
-    images = await comfyui_client.process_workflow(json_data, {})
+    images = await comfyui_client.process_workflow(json_data, {}, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(images)} node(s)")
     
-    extracted = extract_images(images)
-    logger.info(f"run_workflow_from_json: Extracted {len(extracted)} MCP Image object(s), returning first image")
+    extracted = extract_image_urls(images)
+    logger.info(f"run_workflow_from_json: Extracted {len(extracted)} URL(s)")
     
     if not extracted:
         raise ValueError("No images were generated")
     
-    img = extracted[0]
-    img_data_len = len(img.data) if hasattr(img.data, '__len__') else 'unknown'
-    logger.info(f"Returning image: format='{img._format}', data type={type(img.data)}, data length={img_data_len}")
-    
-    return img
+    logger.info(f"Returning {len(extracted)} download URL(s)")
+    return extracted
 
 
 if __name__ == "__main__":
