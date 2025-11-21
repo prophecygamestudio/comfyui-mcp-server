@@ -3,7 +3,12 @@ from __future__ import annotations
 import json
 import base64
 import logging
+import os
+import urllib.request
+import urllib.parse
+from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 from client.comfyui import ComfyUI
@@ -124,11 +129,89 @@ def extract_image_urls(images: dict) -> list[str]:
     return result
 
 
-@mcp.tool()
-async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 8.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> list[str]:
-    """Generate an image from a prompt. Returns ComfyUI download links for the generated images.
+def download_and_save_images(urls: list[str], output_directory: str) -> list[Image]:
+    """Download images from URLs, save them to disk, and return Image objects.
     
     Args:
+        urls: List of image URLs to download.
+        output_directory: Directory where images will be saved.
+    
+    Returns:
+        list[Image]: List of Image objects with raw image bytes (FastMCP handles base64 encoding).
+    """
+    if not urls:
+        raise ValueError("No image URLs provided")
+    
+    # Ensure output directory exists
+    output_path = Path(output_directory)
+    output_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"Output directory: {output_path.absolute()}")
+    
+    image_objects = []
+    
+    for idx, url in enumerate(urls):
+        logger.info(f"Downloading image {idx + 1}/{len(urls)} from {url}")
+        
+        try:
+            # Download image
+            req = urllib.request.Request(url)
+            if comfyui_client.settings.authentication:
+                req.add_header("Authorization", comfyui_client.settings.authentication)
+            
+            with urllib.request.urlopen(req) as response:
+                image_bytes = response.read()
+                logger.info(f"Downloaded {len(image_bytes)} bytes for image {idx + 1}")
+            
+            # Determine file extension from URL or content
+            parsed_url = urllib.parse.urlparse(url)
+            query_params = urllib.parse.parse_qs(parsed_url.query)
+            
+            # Try to get format from filename in URL
+            filename = query_params.get('filename', ['image.png'])[0]
+            if '.' in filename:
+                ext = filename.rsplit('.', 1)[1].lower()
+            else:
+                # Default to png if we can't determine
+                ext = 'png'
+            
+            # Generate unique filename with timestamp
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_filename = f"image_{timestamp}_{idx + 1}.{ext}"
+            save_path = output_path / save_filename
+            
+            # Save image to disk
+            with open(save_path, 'wb') as f:
+                f.write(image_bytes)
+            logger.info(f"Saved image {idx + 1} to {save_path.absolute()}")
+            
+            # Create Image object with raw bytes (FastMCP handles base64 encoding internally)
+            # Determine format from extension
+            format_map = {
+                'png': 'png',
+                'jpg': 'jpeg',
+                'jpeg': 'jpeg',
+                'webp': 'webp',
+                'gif': 'gif'
+            }
+            image_format = format_map.get(ext, 'png')
+            
+            image_obj = Image(data=image_bytes, format=image_format)
+            image_objects.append(image_obj)
+            
+        except Exception as e:
+            logger.error(f"Failed to download/save image {idx + 1} from {url}: {str(e)}", exc_info=True)
+            raise
+    
+    logger.info(f"Successfully downloaded and saved {len(image_objects)} image(s) to {output_path.absolute()}")
+    return image_objects
+
+
+@mcp.tool()
+async def text_to_image(output_directory: str, prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: Optional[float] = None, denoise: Optional[float] = None, width: Optional[int] = None, height: Optional[int] = None) -> list[Image]:
+    """Generate an image from a prompt. Returns Image objects for preview and saves files to the output directory.
+    
+    Args:
+        output_directory: Required. Full local file path (not relative) to a directory where generated image files will be saved. Generated files can be found there.
         prompt: The prompt to generate the image from.  Uses natural language prompt.
         seed: The seed to use for the image generation.
         steps: The number of steps to use for the image generation.
@@ -138,15 +221,26 @@ async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Opt
         height: The height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
     
     Returns:
-        list[str]: List of ComfyUI download URLs for the generated images. Files can be downloaded from these links.
+        list[Image]: List of Image objects for preview. Generated files are saved to the output directory.
     """
-    logger.info(f"text_to_image called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, width={width}, height={height}")
+    if not output_directory:
+        raise ValueError("output_directory is required")
     
-    params = {"prompt": prompt, "cfg": cfg, "denoise": denoise, "width": width, "height": height}
+    logger.info(f"text_to_image called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, denoise={denoise}, width={width}, height={height}, output_directory={output_directory}")
+    
+    params = {"prompt": prompt}
     if seed is not None:
         params["seed"] = seed
     if steps is not None:
         params["steps"] = steps
+    if cfg is not None:
+        params["cfg"] = cfg
+    if denoise is not None:
+        params["denoise"] = denoise
+    if width is not None:
+        params["width"] = width
+    if height is not None:
+        params["height"] = height
     
     logger.info(f"Processing workflow 'text_to_image' with params: {params}")
     images = await comfyui_client.process_workflow("text_to_image", params, return_url=True)
@@ -158,15 +252,18 @@ async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Opt
     if not extracted:
         raise ValueError("No images were generated")
     
-    logger.info(f"Returning {len(extracted)} download URL(s)")
-    return extracted
+    # Download, save, and convert to Image objects
+    image_objects = download_and_save_images(extracted, output_directory)
+    logger.info(f"Returning {len(image_objects)} Image object(s)")
+    return image_objects
 
 
 @mcp.tool()
-async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 7.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> list[str]:
-    """Generate a placeholder image from a prompt. Optimized for quick placeholder generation. Returns ComfyUI download links for the generated images.
+async def text_to_image_placeholder(output_directory: str, prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: Optional[float] = None, denoise: Optional[float] = None, width: Optional[int] = None, height: Optional[int] = None) -> list[Image]:
+    """Generate a placeholder image from a prompt. Optimized for quick placeholder generation. Returns Image objects for preview and saves files to the output directory.
     
     Args:
+        output_directory: Required. Full local file path (not relative) to a directory where generated image files will be saved. Generated files can be found there.
         prompt: The prompt to generate the placeholder image from. Uses comma separated tags such as "dog, walking, sunset"
         seed: The seed to use for the image generation.
         steps: The number of steps to use for the image generation.
@@ -176,15 +273,26 @@ async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None
         height: The height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
     
     Returns:
-        list[str]: List of ComfyUI download URLs for the generated placeholder images. Files can be downloaded from these links.
+        list[Image]: List of Image objects for preview. Generated files are saved to the output directory.
     """
-    logger.info(f"text_to_image_placeholder called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, width={width}, height={height}")
+    if not output_directory:
+        raise ValueError("output_directory is required")
     
-    params = {"prompt": prompt, "cfg": cfg, "denoise": denoise, "width": width, "height": height}
+    logger.info(f"text_to_image_placeholder called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, denoise={denoise}, width={width}, height={height}, output_directory={output_directory}")
+    
+    params = {"prompt": prompt}
     if seed is not None:
         params["seed"] = seed
     if steps is not None:
         params["steps"] = steps
+    if cfg is not None:
+        params["cfg"] = cfg
+    if denoise is not None:
+        params["denoise"] = denoise
+    if width is not None:
+        params["width"] = width
+    if height is not None:
+        params["height"] = height
     
     logger.info(f"Processing workflow 'text_to_image_placeholder' with params: {params}")
     workflow_images = await comfyui_client.process_workflow("text_to_image_placeholder", params, return_url=True)
@@ -196,15 +304,18 @@ async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None
     if not extracted:
         raise ValueError("No images were generated")
     
-    logger.info(f"Returning {len(extracted)} download URL(s)")
-    return extracted
+    # Download, save, and convert to Image objects
+    image_objects = download_and_save_images(extracted, output_directory)
+    logger.info(f"Returning {len(image_objects)} Image object(s)")
+    return image_objects
 
 
 @mcp.tool()
-async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: float = 8.0, denoise: float = 1.0, width: int = 1024, height: int = 1024) -> list[str]:
-    """Edit one or more images using a prompt. Returns ComfyUI download links for the edited images.
+async def edit_image(output_directory: str, images: list[ImageInput], prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: Optional[float] = None, denoise: Optional[float] = None, width: Optional[int] = None, height: Optional[int] = None) -> list[Image]:
+    """Edit one or more images using a prompt. Returns Image objects for preview and saves files to the output directory.
     
     Args:
+        output_directory: Required. Full local file path (not relative) to a directory where generated image files will be saved. Generated files can be found there.
         images: List of images to edit. Each image should have base64-encoded data and format.
         prompt: The prompt to guide the image editing. Uses natural language prompt in the form of requests for changes (ex: "Change the person's hair color to blonde")
         seed: The seed to use for the image generation.
@@ -215,10 +326,12 @@ async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[
         height: The target height of the generated image in pixels.
     
     Returns:
-        list[str]: List of ComfyUI download URLs for the edited images. Files can be downloaded from these links.
+        list[Image]: List of Image objects for preview. Generated files are saved to the output directory.
     """
     if not images:
         raise ValueError("At least one image must be provided")
+    if not output_directory:
+        raise ValueError("output_directory is required")
     
     # Convert Pydantic ImageInput models to FastMCP Image objects
     mcp_images = [img_input.to_image() for img_input in images]
@@ -236,17 +349,21 @@ async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[
     # which may differ from the requested names if ComfyUI renamed them to avoid conflicts.
     params = {
         "prompt": prompt,
-        "cfg": cfg,
-        "denoise": denoise,
         "uploaded_images": upload_results,  # Pass all uploaded images with their actual names
-        "width": width,
-        "height": height
     }
     if seed is not None:
         params["seed"] = seed
     if steps is not None:
         params["steps"] = steps
-    logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', cfg={cfg}, width={width}, height={height}, {len(upload_results)} uploaded image(s)")
+    if cfg is not None:
+        params["cfg"] = cfg
+    if denoise is not None:
+        params["denoise"] = denoise
+    if width is not None:
+        params["width"] = width
+    if height is not None:
+        params["height"] = height
+    logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', cfg={cfg}, denoise={denoise}, width={width}, height={height}, {len(upload_results)} uploaded image(s), output_directory={output_directory}")
     workflow_images = await comfyui_client.process_workflow("edit_image", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
     
@@ -256,21 +373,27 @@ async def edit_image(images: list[ImageInput], prompt: str = "", seed: Optional[
     if not extracted:
         raise ValueError("No images were generated")
     
-    logger.info(f"Returning {len(extracted)} download URL(s)")
-    return extracted
+    # Download, save, and convert to Image objects
+    image_objects = download_and_save_images(extracted, output_directory)
+    logger.info(f"Returning {len(image_objects)} Image object(s)")
+    return image_objects
 
 
 @mcp.tool()
-async def run_workflow_from_file(file_path: str = "") -> list[str]:
-    """Run a workflow from a file. Returns ComfyUI download links for the generated images.
+async def run_workflow_from_file(output_directory: str, file_path: str = "") -> list[Image]:
+    """Run a workflow from a file. Returns Image objects for preview and saves files to the output directory.
     
     Args:
+        output_directory: Required. Full local file path (not relative) to a directory where generated image files will be saved. Generated files can be found there.
         file_path: The absolute path to the file to run.
     
     Returns:
-        list[str]: List of ComfyUI download URLs for the generated images. Files can be downloaded from these links.
+        list[Image]: List of Image objects for preview. Generated files are saved to the output directory.
     """
-    logger.info(f"run_workflow_from_file called with file_path='{file_path}'")
+    if not output_directory:
+        raise ValueError("output_directory is required")
+    
+    logger.info(f"run_workflow_from_file called with file_path='{file_path}', output_directory={output_directory}")
     
     with open(file_path, "r", encoding="utf-8") as f:
         workflow = json.load(f)
@@ -285,21 +408,27 @@ async def run_workflow_from_file(file_path: str = "") -> list[str]:
     if not extracted:
         raise ValueError("No images were generated")
     
-    logger.info(f"Returning {len(extracted)} download URL(s)")
-    return extracted
+    # Download, save, and convert to Image objects
+    image_objects = download_and_save_images(extracted, output_directory)
+    logger.info(f"Returning {len(image_objects)} Image object(s)")
+    return image_objects
 
 
 @mcp.tool()
-async def run_workflow_from_json(json_data: Optional[dict] = None) -> list[str]:
-    """Run a workflow from JSON data. Returns ComfyUI download links for the generated images.
+async def run_workflow_from_json(output_directory: str, json_data: Optional[dict] = None) -> list[Image]:
+    """Run a workflow from JSON data. Returns Image objects for preview and saves files to the output directory.
     
     Args:
+        output_directory: Required. Full local file path (not relative) to a directory where generated image files will be saved. Generated files can be found there.
         json_data: The JSON workflow to run.
     
     Returns:
-        list[str]: List of ComfyUI download URLs for the generated images. Files can be downloaded from these links.
+        list[Image]: List of Image objects for preview. Generated files are saved to the output directory.
     """
-    logger.info(f"run_workflow_from_json called with json_data={'provided' if json_data else 'None'}")
+    if not output_directory:
+        raise ValueError("output_directory is required")
+    
+    logger.info(f"run_workflow_from_json called with json_data={'provided' if json_data else 'None'}, output_directory={output_directory}")
     
     if json_data is None:
         json_data = {}
@@ -314,8 +443,10 @@ async def run_workflow_from_json(json_data: Optional[dict] = None) -> list[str]:
     if not extracted:
         raise ValueError("No images were generated")
     
-    logger.info(f"Returning {len(extracted)} download URL(s)")
-    return extracted
+    # Download, save, and convert to Image objects
+    image_objects = download_and_save_images(extracted, output_directory)
+    logger.info(f"Returning {len(image_objects)} Image object(s)")
+    return image_objects
 
 
 if __name__ == "__main__":
