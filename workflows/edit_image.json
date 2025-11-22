@@ -126,7 +126,10 @@
     },
     "76": {
       "inputs": {
-        "prompt": "",
+        "prompt": [
+          "103",
+          0
+        ],
         "clip": [
           "38",
           0
@@ -147,7 +150,10 @@
     },
     "77": {
       "inputs": {
-        "prompt": "",
+        "prompt": [
+          "105",
+          0
+        ],
         "clip": [
           "38",
           0
@@ -168,11 +174,12 @@
     },
     "78": {
       "inputs": {
-        "image": ""
+        "image": "",
+        "refresh": "refresh"
       },
-      "class_type": "LoadImage",
+      "class_type": "LoadImageOutput",
       "_meta": {
-        "title": "Load Image 1"
+        "title": "Load Image (from Outputs)"
       }
     },
     "88": {
@@ -234,6 +241,15 @@
         "title": "Param CFG"
       }
     },
+    "103": {
+      "inputs": {
+        "value": ""
+      },
+      "class_type": "PrimitiveString",
+      "_meta": {
+        "title": "Param Positive Prompt"
+      }
+    },
     "104": {
       "inputs": {
         "lora_name": "Qwen-Image-Lightning-4steps-V1.0.safetensors",
@@ -246,6 +262,15 @@
       "class_type": "LoraLoaderModelOnly",
       "_meta": {
         "title": "LoraLoaderModelOnly"
+      }
+    },
+    "105": {
+      "inputs": {
+        "value": ""
+      },
+      "class_type": "PrimitiveString",
+      "_meta": {
+        "title": "Param Negative Prompt"
       }
     }
   }

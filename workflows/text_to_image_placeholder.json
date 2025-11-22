@@ -50,8 +50,14 @@
     },
     "5": {
         "inputs": {
-            "width": 1024,
-            "height": 1024,
+            "width": [
+                "105",
+                0
+            ],
+            "height": [
+                "106",
+                0
+            ],
             "batch_size": 1
         },
         "class_type": "EmptyLatentImage",
@@ -61,7 +67,10 @@
     },
     "6": {
         "inputs": {
-            "text": "",
+            "text": [
+                "103",
+                0
+            ],
             "clip": [
                 "4",
                 1
@@ -74,7 +83,10 @@
     },
     "7": {
         "inputs": {
-            "text": "",
+            "text": [
+                "104",
+                0
+            ],
             "clip": [
                 "4",
                 1
@@ -141,6 +153,44 @@
         "class_type": "PrimitiveFloat",
         "_meta": {
             "title": "Param CFG"
+        }
+    },
+    "103": {
+        "inputs": {
+            "value": ""
+        },
+        "class_type": "PrimitiveString",
+        "_meta": {
+            "title": "Param Positive Prompt"
+        }
+    },
+    "104": {
+        "inputs": {
+            "value": ""
+        },
+        "class_type": "PrimitiveString",
+        "_meta": {
+            "title": "Param Negative Prompt"
+        }
+    },
+    "105": {
+        "inputs": {
+            "value": 1024,
+            "control_after_generate": "fixed"
+        },
+        "class_type": "PrimitiveInt",
+        "_meta": {
+            "title": "Param Width"
+        }
+    },
+    "106": {
+        "inputs": {
+            "value": 1024,
+            "control_after_generate": "fixed"
+        },
+        "class_type": "PrimitiveInt",
+        "_meta": {
+            "title": "Param Height"
         }
     }
 }

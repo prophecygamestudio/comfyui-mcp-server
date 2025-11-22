@@ -363,23 +363,14 @@ class ComfyUI:
         for node_id, node in prompt.items():
             node_title = node.get("_meta", {}).get("title", "")
             
-            # Handle positive prompt - support both new and old parameter names
-            if node_title == "Positive Prompt":
-                if "positive_prompt" in params:
-                    if isinstance(node["inputs"]["text"], str):
-                        node["inputs"]["text"] = params["positive_prompt"]
-                elif "prompt" in params:
-                    # Backward compatibility
-                    if isinstance(node["inputs"]["text"], str):
-                        node["inputs"]["text"] = params["prompt"]
-                elif "text" in params:
-                    # Backward compatibility
-                    if isinstance(node["inputs"]["text"], str):
-                        node["inputs"]["text"] = params["text"]
-            # Handle negative prompt
-            elif node_title == "Negative Prompt" and "negative_prompt" in params:
-                if isinstance(node["inputs"]["text"], str):
-                    node["inputs"]["text"] = params["negative_prompt"]
+            # Handle positive prompt - inject into PrimitiveString node
+            if node_title == "Param Positive Prompt" and "prompt" in params:
+                if node.get("class_type") == "PrimitiveString":
+                    node["inputs"]["value"] = params["prompt"]
+            # Handle negative prompt - inject into PrimitiveString node
+            elif node_title == "Param Negative Prompt" and "negative_prompt" in params:
+                if node.get("class_type") == "PrimitiveString":
+                    node["inputs"]["value"] = params["negative_prompt"]
             # Handle parameter nodes - inject values into parameter nodes only
             elif node_title == "Param Seed" and "seed" in params:
                 if node.get("class_type") == "PrimitiveInt":
@@ -392,8 +383,16 @@ class ComfyUI:
                     node["inputs"]["value"] = params["cfg"]
                 elif node.get("class_type") == "PrimitiveInt":
                     node["inputs"]["value"] = int(params["cfg"])
+            # Handle LoadImageOutput nodes - inject image reference for images already on the server
+            elif node_title and ("Load Image (from Outputs)" in node_title or node.get("class_type") == "LoadImageOutput"):
+                # LoadImageOutput expects format: "filename [output]"
+                if "image" in params:
+                    image_ref = params["image"]
+                    if isinstance(image_ref, str):
+                        node["inputs"]["image"] = image_ref
+                        logger.info(f"Set LoadImageOutput node {node_id} image to: {image_ref}")
             # Handle LoadImage nodes - inject directly into LoadImage nodes using title to match images
-            elif node_title and "Load Image" in node_title:
+            elif node_title and "Load Image" in node_title and node.get("class_type") == "LoadImage":
                 # Extract index from title (e.g., "Load Image 1" -> 1, "Load Image 2" -> 2)
                 # Title format is "Load Image" followed by optional number
                 index = 1  # Default to 1 if no number specified
@@ -443,9 +442,11 @@ class ComfyUI:
                                     node["inputs"]["subfolder"] = subfolder_value
                     elif isinstance(uploaded, str):
                         node["inputs"]["image"] = uploaded
-            # Handle empty latent image (resolution)
-            elif node_title == "Empty Latent Image":
-                if "width" in params:
-                    node["inputs"]["width"] = params["width"]
-                if "height" in params:
-                    node["inputs"]["height"] = params["height"]
+            # Handle width parameter - inject into PrimitiveInt node
+            elif node_title == "Param Width" and "width" in params:
+                if node.get("class_type") == "PrimitiveInt":
+                    node["inputs"]["value"] = params["width"]
+            # Handle height parameter - inject into PrimitiveInt node
+            elif node_title == "Param Height" and "height" in params:
+                if node.get("class_type") == "PrimitiveInt":
+                    node["inputs"]["value"] = params["height"]

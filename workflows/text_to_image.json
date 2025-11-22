@@ -41,7 +41,10 @@
     },
     "6": {
       "inputs": {
-        "text": "",
+        "text": [
+          "103",
+          0
+        ],
         "clip": [
           "38",
           0
@@ -54,7 +57,10 @@
     },
     "7": {
       "inputs": {
-        "text": "",
+        "text": [
+          "104",
+          0
+        ],
         "clip": [
           "38",
           0
@@ -113,8 +119,14 @@
     },
     "58": {
       "inputs": {
-        "width": 1328,
-        "height": 1328,
+        "width": [
+          "105",
+          0
+        ],
+        "height": [
+          "106",
+          0
+        ],
         "batch_size": 1
       },
       "class_type": "EmptySD3LatentImage",
@@ -189,6 +201,44 @@
       "class_type": "PrimitiveFloat",
       "_meta": {
         "title": "Param CFG"
+      }
+    },
+    "103": {
+      "inputs": {
+        "value": ""
+      },
+      "class_type": "PrimitiveString",
+      "_meta": {
+        "title": "Param Positive Prompt"
+      }
+    },
+    "104": {
+      "inputs": {
+        "value": ""
+      },
+      "class_type": "PrimitiveString",
+      "_meta": {
+        "title": "Param Negative Prompt"
+      }
+    },
+    "105": {
+      "inputs": {
+        "value": 1328,
+        "control_after_generate": "fixed"
+      },
+      "class_type": "PrimitiveInt",
+      "_meta": {
+        "title": "Param Width"
+      }
+    },
+    "106": {
+      "inputs": {
+        "value": 1328,
+        "control_after_generate": "fixed"
+      },
+      "class_type": "PrimitiveInt",
+      "_meta": {
+        "title": "Param Height"
       }
     }
   }
