@@ -380,7 +380,7 @@ async def edit_image(
     return handle_image_response(workflow_images, save_path)
 
 
-@mcp.tool()
+@mcp.tool(enabled=False)
 async def run_workflow_from_file(
         file_path: Annotated[str, Field(description="The absolute path to the file to run.")] = "",
         save_path: Annotated[Optional[str], Field(description="Optional path to save the image(s). Can be a directory path or a full file path. If directory and multiple images are generated, each will be saved with a unique filename. If not provided, the images will not be saved.")] = None,
@@ -398,7 +398,7 @@ async def run_workflow_from_file(
     return handle_images_response(images, save_path)
 
 
-@mcp.tool()
+@mcp.tool(enabled=False)
 async def run_workflow_from_json(
         json_data: Annotated[Optional[dict], Field(description="The JSON workflow to run.")] = None,
         save_path: Annotated[Optional[str], Field(description="Optional path to save the image(s). Can be a directory path or a full file path. If directory and multiple images are generated, each will be saved with a unique filename. If not provided, the images will not be saved.")] = None,
