@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import urllib.request
 import urllib.parse
 from datetime import datetime
@@ -287,26 +288,15 @@ def handle_images_response(images: dict, save_path: Optional[str] = None) -> lis
 @mcp.tool()
 async def text_to_image(
         prompt: Annotated[str, Field(description="prompt to generate the image from (uses natural language prompt)")] = "",
-        seed: Annotated[Optional[int], Field(description="seed to use for the image generation")] = None,
-        steps: Annotated[Optional[int], Field(description="number of steps to use for the image generation")] = None,
-        cfg: Annotated[Optional[float], Field(description="CFG scale to use for the image generation.")] = None,
-        denoise: Annotated[Optional[float], Field(description="denoise strength to use for the image generation.")] = None,
-        width: Annotated[int, Field(description="width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
-        height: Annotated[int, Field(description="height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
+        width: Annotated[int, Field(description="pixel width of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
+        height: Annotated[int, Field(description="pixel height of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
         save_path: Annotated[Optional[str], Field(description="Optional path to save the image. Can be a directory path or a full file path. If not provided, the image will not be saved.")] = None,
 ) -> Image:
     """Generate an image from a prompt. Returns the generated image."""
-    logger.info(f"text_to_image called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, denoise={denoise}, width={width}, height={height}, save_path={save_path}")
+    seed = random.randint(0, 2**32 - 1)
+    logger.info(f"text_to_image called with prompt='{prompt[:50]}...', seed={seed}, width={width}, height={height}, save_path={save_path}")
     
-    params = {"prompt": prompt, "width": width, "height": height}
-    if seed is not None:
-        params["seed"] = seed
-    if steps is not None:
-        params["steps"] = steps
-    if cfg is not None:
-        params["cfg"] = cfg
-    if denoise is not None:
-        params["denoise"] = denoise
+    params = {"prompt": prompt, "width": width, "height": height, "seed": seed}
     
     logger.info(f"Processing workflow 'text_to_image' with params: {params}")
     images = await comfyui_client.process_workflow("text_to_image", params, return_url=True)
@@ -318,26 +308,15 @@ async def text_to_image(
 @mcp.tool()
 async def text_to_image_placeholder(
         prompt: Annotated[str, Field(description="prompt to generate the image from (Uses comma separated tags such as \"dog, walking, sunset\")")] = "",
-        seed: Annotated[Optional[int], Field(description="Optional integer seed to use for the image generation")] = None,
-        steps: Annotated[Optional[int], Field(description="Optional integer number of steps to use for the image generation")] = None,
-        cfg: Annotated[Optional[float], Field(description="Optional float CFG scale to use for the image generation.")] = None,
-        denoise: Annotated[Optional[float], Field(description="Optional float denoise strength to use for the image generation.")] = None,
-        width: Annotated[int, Field(description="width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
-        height: Annotated[int, Field(description="height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
+        width: Annotated[int, Field(description="pixel width of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
+        height: Annotated[int, Field(description="pixel height of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
         save_path: Annotated[Optional[str], Field(description="Optional path to save the image. Can be a directory path or a full file path. If not provided, the image will not be saved.")] = None,
 ) -> Image:
-    """Generate a placeholder image from a prompt. Optimized for quick placeholder generation. Returns the generated image. The text_to_image_placeholder workflow generates 1 image at a time."""
-    logger.info(f"text_to_image_placeholder called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, denoise={denoise}, width={width}, height={height}, save_path={save_path}")
+    """Generate a placeholder image from a prompt. Optimized for quick placeholder generation. Returns the generated image."""
+    seed = random.randint(0, 2**32 - 1)
+    logger.info(f"text_to_image_placeholder called with prompt='{prompt[:50]}...', seed={seed}, width={width}, height={height}, save_path={save_path}")
     
-    params = {"prompt": prompt, "width": width, "height": height}
-    if seed is not None:
-        params["seed"] = seed
-    if steps is not None:
-        params["steps"] = steps
-    if cfg is not None:
-        params["cfg"] = cfg
-    if denoise is not None:
-        params["denoise"] = denoise
+    params = {"prompt": prompt, "width": width, "height": height, "seed": seed}
     
     logger.info(f"Processing workflow 'text_to_image_placeholder' with params: {params}")
     workflow_images = await comfyui_client.process_workflow("text_to_image_placeholder", params, return_url=True)
@@ -360,19 +339,16 @@ def extract_filename_from_url(url: Annotated[str, Field(description="ComfyUI Dow
 async def edit_image(
         image: Annotated[str, Field(description="Filename of an image already on the ComfyUI server (e.g., \"ComfyUI_00115_.png\") or a download URL from which the filename will be extracted.")],
         prompt: Annotated[str, Field(description="The prompt to guide the image editing. Uses natural language prompt in the form of requests for changes (ex: \"Change the person's hair color to blonde\")")] = "",
-        seed: Annotated[Optional[int], Field(description="Optional integer seed to use for the image generation.")] = None,
-        steps: Annotated[Optional[int], Field(description="Optional integer number of steps to use for the image generation.")] = None,
-        cfg: Annotated[Optional[float], Field(description="Optional float CFG scale to use for the image generation.")] = None,
-        denoise: Annotated[Optional[float], Field(description="Optional float denoise strength to use for the image generation.")] = None,
-        width: Annotated[int, Field(description="target width of the generated image in pixels.")] = 1024,
-        height: Annotated[int, Field(description="target height of the generated image in pixels.")] = 1024,
+        width: Annotated[int, Field(description="target pixel width of the edited image.")] = 1024,
+        height: Annotated[int, Field(description="target pixel height of the edited image.")] = 1024,
         save_path: Annotated[Optional[str], Field(description="Optional path to save the image. Can be a directory path or a full file path. If not provided, the image will not be saved.")] = None,
 ) -> Image:
-    """Edit an image using a prompt. The image must already exist on the ComfyUI server (from a previous generation). Returns the generated image. The edit_image workflow generates 1 image at a time."""
+    """Edit an image using a prompt. The image must already exist on the ComfyUI server (from a previous generation). Returns the generated image."""
     if not image:
         raise ValueError("image parameter is required")
     
-    logger.info(f"edit_image called with image='{image}', prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, denoise={denoise}, width={width}, height={height}, save_path={save_path}")
+    seed = random.randint(0, 2**32 - 1)
+    logger.info(f"edit_image called with image='{image}', prompt='{prompt[:50]}...', seed={seed}, width={width}, height={height}, save_path={save_path}")
     
     # Extract filename from URL if it's a URL, otherwise use it as-is
     if image.startswith("http://") or image.startswith("https://"):
@@ -390,16 +366,9 @@ async def edit_image(
         "image": image_reference,  # Pass image reference for LoadImageOutput node
         "width": width,
         "height": height,
+        "seed": seed,
     }
-    if seed is not None:
-        params["seed"] = seed
-    if steps is not None:
-        params["steps"] = steps
-    if cfg is not None:
-        params["cfg"] = cfg
-    if denoise is not None:
-        params["denoise"] = denoise
-    logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', cfg={cfg}, denoise={denoise}, width={width}, height={height}, image='{image_reference}'")
+    logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', width={width}, height={height}, image='{image_reference}'")
     workflow_images = await comfyui_client.process_workflow("edit_image", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
 
