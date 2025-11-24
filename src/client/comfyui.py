@@ -21,7 +21,7 @@ class ComfyUISettings(BaseSettings):
     host: str = "localhost"
     port: int = 8188
     authentication: str | None = None
-    workflow_dir: str = "workflows"
+    workflow_dir: str = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "workflows")
     upload_subfolder: str = "uploads"
 
 
