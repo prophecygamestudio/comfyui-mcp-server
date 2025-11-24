@@ -174,12 +174,11 @@
     },
     "78": {
       "inputs": {
-        "image": "",
-        "refresh": "refresh"
+        "image": ""
       },
-      "class_type": "LoadImageOutput",
+      "class_type": "LoadImage",
       "_meta": {
-        "title": "Load Image (from Outputs)"
+        "title": "Load Image 1"
       }
     },
     "88": {

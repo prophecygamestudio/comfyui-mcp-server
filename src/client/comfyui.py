@@ -92,10 +92,32 @@ class ComfyUI:
         p = {"prompt": prompt, "client_id": self.client_id}
         data = json.dumps(p).encode("utf-8")
         req = urllib.request.Request(f"{self.http_url}/prompt", headers=self.headers, data=data)
-        with urllib.request.urlopen(req) as resp:
-            resp_data = resp.read()
-            resp_json = json.loads(resp_data)
-            return resp_json
+        
+        try:
+            with urllib.request.urlopen(req) as resp:
+                resp_data = resp.read()
+                resp_json = json.loads(resp_data)
+                return resp_json
+        except urllib.error.HTTPError as e:
+            # Try to read error response body
+            error_body = "No error details available"
+            try:
+                if hasattr(e, 'read'):
+                    error_body = e.read().decode('utf-8', errors='ignore')
+                elif hasattr(e, 'fp') and e.fp:
+                    error_body = e.fp.read().decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+            
+            # Log the workflow that caused the error for debugging
+            logger.error(f"HTTP {e.code} error queueing prompt: {e.reason}")
+            logger.error(f"Error response: {error_body}")
+            logger.error(f"Workflow JSON (first 1000 chars): {json.dumps(prompt, indent=2)[:1000]}")
+            
+            raise ValueError(f"Failed to queue prompt to ComfyUI server: HTTP {e.code} {e.reason}. {error_body}")
+        except Exception as e:
+            logger.error(f"Unexpected error queueing prompt: {str(e)}", exc_info=True)
+            raise
     
     def upload_image_from_content(self, image_content) -> Dict[str, Any]:
         """Upload an image from MCP ImageContent to the ComfyUI server.
@@ -173,14 +195,30 @@ class ComfyUI:
             - 'subfolder': The subfolder where the image was stored (may be empty string or the subfolder from response)
             - 'type': The upload type
         """
+        # Determine Content-Type based on file extension
+        ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else 'png'
+        content_type_map = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'webp': 'image/webp',
+            'gif': 'image/gif',
+            'bmp': 'image/bmp'
+        }
+        content_type = content_type_map.get(ext, 'image/png')
+        
+        # Escape filename for use in Content-Disposition header (handle special characters)
+        # RFC 2231 encoding for filenames with special characters
+        safe_filename = filename.replace('\\', '\\\\').replace('"', '\\"')
+        
         # Create multipart form data matching ComfyUI's expected format
         boundary = uuid.uuid4().hex
         form_data = []
         
         # Add image file - ComfyUI expects "image" field
         form_data.append(f'--{boundary}'.encode())
-        form_data.append(f'Content-Disposition: form-data; name="image"; filename="{filename}"'.encode())
-        form_data.append(b'Content-Type: image/png')
+        form_data.append(f'Content-Disposition: form-data; name="image"; filename="{safe_filename}"'.encode())
+        form_data.append(f'Content-Type: {content_type}'.encode())
         form_data.append(b'')
         form_data.append(image_bytes)
         
@@ -214,8 +252,26 @@ class ComfyUI:
             data=body
         )
         
-        response = urllib.request.urlopen(req)
-        upload_response = json.loads(response.read())
+        try:
+            response = urllib.request.urlopen(req)
+            response_text = response.read().decode('utf-8')
+            logger.info(f"Raw ComfyUI upload response: {response_text}")
+            upload_response = json.loads(response_text)
+        except urllib.error.HTTPError as e:
+            # Try to read error response body
+            error_body = "No error details available"
+            try:
+                if hasattr(e, 'read'):
+                    error_body = e.read().decode('utf-8', errors='ignore')
+                elif hasattr(e, 'fp') and e.fp:
+                    error_body = e.fp.read().decode('utf-8', errors='ignore')
+            except Exception:
+                pass
+            logger.error(f"HTTP {e.code} error uploading image: {e.reason}. Response: {error_body}")
+            raise ValueError(f"Failed to upload image to ComfyUI server: HTTP {e.code} {e.reason}. {error_body}")
+        except Exception as e:
+            logger.error(f"Unexpected error uploading image: {str(e)}", exc_info=True)
+            raise ValueError(f"Failed to upload image to ComfyUI server: {str(e)}")
         
         # Ensure the response has the expected structure
         # ComfyUI may return the actual filename used (which could be renamed to avoid conflicts)
@@ -232,9 +288,16 @@ class ComfyUI:
             # If not in response, use the one we sent, or empty string
             if 'subfolder' not in upload_response:
                 upload_response['subfolder'] = subfolder if subfolder else ""
+                if subfolder:
+                    logger.info(f"Added subfolder '{subfolder}' to upload response (not in ComfyUI response)")
+            elif not upload_response.get('subfolder') and subfolder:
+                # If response has empty subfolder but we sent one, use the one we sent
+                upload_response['subfolder'] = subfolder
+                logger.info(f"Replaced empty subfolder with '{subfolder}' in upload response")
             # Note: If 'subfolder' is in response (even if empty string), we use that value
             # as ComfyUI may have modified it
         
+        logger.info(f"Final upload_response: {upload_response}")
         return upload_response
     
     async def process_workflow(self, workflow: Any, params: Dict[str, Any], return_url: bool = False):
@@ -256,6 +319,39 @@ class ComfyUI:
         logger.info(f"Updating workflow parameters: {list(params.keys())}")
         self.update_workflow_params(prompt, params)
         logger.info("Workflow parameters updated")
+        
+        # Final pass: Ensure LoadImage nodes have subfolder set if we have uploaded_image with subfolder
+        if "uploaded_image" in params and isinstance(params["uploaded_image"], dict):
+            uploaded = params["uploaded_image"]
+            subfolder_to_use = uploaded.get("subfolder") or params.get("uploaded_image_subfolder")
+            
+            if subfolder_to_use:
+                for node_id, node in prompt.items():
+                    if node.get("class_type") == "LoadImage":
+                        image_name = node.get("inputs", {}).get("image", "")
+                        current_subfolder = node.get("inputs", {}).get("subfolder")
+                        # If image is set but subfolder is not, set it
+                        if image_name and not current_subfolder:
+                            node["inputs"]["subfolder"] = subfolder_to_use
+                            logger.info(f"Final pass: Set LoadImage node {node_id} subfolder to '{subfolder_to_use}' (was missing)")
+                        # Also ensure subfolder matches what we uploaded with
+                        elif image_name and current_subfolder != subfolder_to_use:
+                            node["inputs"]["subfolder"] = subfolder_to_use
+                            logger.warning(f"Final pass: Updated LoadImage node {node_id} subfolder from '{current_subfolder}' to '{subfolder_to_use}'")
+        
+        # Validate LoadImage nodes have image set and log their final state
+        for node_id, node in prompt.items():
+            if node.get("class_type") == "LoadImage":
+                image_name = node.get("inputs", {}).get("image", "")
+                subfolder = node.get("inputs", {}).get("subfolder", "NOT SET")
+                logger.info(f"LoadImage node {node_id} final state: image='{image_name}', subfolder='{subfolder}'")
+                logger.info(f"LoadImage node {node_id} full inputs: {json.dumps(node.get('inputs', {}), indent=2)}")
+                if not image_name:
+                    raise ValueError(f"LoadImage node {node_id} has no image set. Cannot queue workflow.")
+        
+        # Log the complete workflow JSON for debugging (first 2000 chars)
+        workflow_json = json.dumps(prompt, indent=2)
+        logger.info(f"Complete workflow JSON (first 2000 chars):\n{workflow_json[:2000]}")
 
         logger.info(f"Connecting to WebSocket: {self.ws_url}")
         ws = websocket.WebSocket()
@@ -392,7 +488,9 @@ class ComfyUI:
                         node["inputs"]["image"] = image_ref
                         logger.info(f"Set LoadImageOutput node {node_id} image to: {image_ref}")
             # Handle LoadImage nodes - inject directly into LoadImage nodes using title to match images
-            elif node_title and "Load Image" in node_title and node.get("class_type") == "LoadImage":
+            # Also handle LoadImage nodes without a title (fallback)
+            elif (node_title and "Load Image" in node_title and node.get("class_type") == "LoadImage") or \
+                 (not node_title and node.get("class_type") == "LoadImage"):
                 # Extract index from title (e.g., "Load Image 1" -> 1, "Load Image 2" -> 2)
                 # Title format is "Load Image" followed by optional number
                 index = 1  # Default to 1 if no number specified
@@ -428,20 +526,59 @@ class ComfyUI:
                             # If it's just a string, treat it as the image name
                             node["inputs"]["image"] = uploaded
                 # Support single uploaded image (for first LoadImage node only, index == 1)
-                elif "uploaded_image" in params and index == 1:
+                # Also handle if no title (treat as index 1)
+                elif "uploaded_image" in params and (index == 1 or not node_title):
                     uploaded = params["uploaded_image"]
+                    logger.info(f"Processing uploaded_image for LoadImage node {node_id} (index={index}): {uploaded}")
                     if isinstance(uploaded, dict):
                         image_name = uploaded.get("name") or uploaded.get("filename") or ""
                         if image_name:
                             node["inputs"]["image"] = image_name
-                            # Set subfolder from response (ComfyUI may have modified it)
-                            # Only set if it's a non-empty string
+                            logger.info(f"Set LoadImage node {node_id} image to: {image_name}")
+                            
+                            # Always set subfolder if it exists in upload result
+                            # ComfyUI needs the subfolder to find images uploaded to subfolders
                             if "subfolder" in uploaded:
                                 subfolder_value = uploaded["subfolder"]
-                                if subfolder_value and isinstance(subfolder_value, str):
-                                    node["inputs"]["subfolder"] = subfolder_value
+                                logger.info(f"Found subfolder in uploaded dict: '{subfolder_value}' (type: {type(subfolder_value)})")
+                                if isinstance(subfolder_value, str):
+                                    if subfolder_value:
+                                        # Non-empty subfolder - set it
+                                        node["inputs"]["subfolder"] = subfolder_value
+                                        logger.info(f"Set LoadImage node {node_id} subfolder to: '{subfolder_value}'")
+                                    else:
+                                        # Empty subfolder - remove the field (image is in root input folder)
+                                        if "subfolder" in node["inputs"]:
+                                            del node["inputs"]["subfolder"]
+                                        logger.info(f"Removed subfolder from LoadImage node {node_id} (empty string in response)")
+                                else:
+                                    logger.warning(f"Subfolder value is not a string: {type(subfolder_value)}, value: {subfolder_value}")
+                            else:
+                                # No subfolder in response - check if we have a fallback subfolder in params
+                                logger.warning(f"No 'subfolder' key in uploaded dict. Keys: {list(uploaded.keys())}")
+                                # Check for fallback subfolder passed separately in params
+                                if "uploaded_image_subfolder" in params:
+                                    fallback_subfolder = params["uploaded_image_subfolder"]
+                                    if fallback_subfolder and isinstance(fallback_subfolder, str):
+                                        node["inputs"]["subfolder"] = fallback_subfolder
+                                        logger.info(f"Set LoadImage node {node_id} subfolder to fallback value: '{fallback_subfolder}'")
+                                    else:
+                                        # No valid fallback - remove subfolder if it exists
+                                        if "subfolder" in node["inputs"]:
+                                            del node["inputs"]["subfolder"]
+                                        logger.warning(f"Removed subfolder from LoadImage node {node_id} (no valid fallback)")
+                                else:
+                                    # No fallback either - remove it if it exists (image might be in root)
+                                    if "subfolder" in node["inputs"]:
+                                        del node["inputs"]["subfolder"]
+                                    logger.warning(f"Removed subfolder from LoadImage node {node_id} (not in upload response and no fallback)")
                     elif isinstance(uploaded, str):
                         node["inputs"]["image"] = uploaded
+                        logger.info(f"Set LoadImage node {node_id} image to: {uploaded}")
+                        # Remove subfolder if it exists (string upload means no subfolder info)
+                        if "subfolder" in node["inputs"]:
+                            del node["inputs"]["subfolder"]
+                            logger.info(f"Removed subfolder from LoadImage node {node_id} (string upload)")
             # Handle width parameter - inject into PrimitiveInt node
             elif node_title == "Param Width" and "width" in params:
                 if node.get("class_type") == "PrimitiveInt":
