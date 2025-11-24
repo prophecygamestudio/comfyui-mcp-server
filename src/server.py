@@ -1,73 +1,20 @@
 from __future__ import annotations
 
 import json
-import base64
 import logging
-import os
 import urllib.request
 import urllib.parse
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Annotated
+
+from pydantic import Field
 
 from client.comfyui import ComfyUI
 from fastmcp.utilities.types import Image
 from fastmcp import FastMCP
-from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-
-class ImageInput(BaseModel):
-    """Pydantic-compatible image input model for MCP tools.
-    
-    This model represents an image that can be passed as a parameter to MCP tools.
-    The Image type from FastMCP is not directly compatible with Pydantic schema generation
-    for tool parameters, so this model serves as an intermediary.
-    """
-    data: str = Field(..., description="Base64-encoded image data")
-    format: str = Field(default="png", description="Image format (png, jpeg, etc.)")
-    
-    def to_image(self) -> Image:
-        """Convert this Pydantic model to a FastMCP Image object."""
-        # FastMCP Image expects raw image bytes (not base64-encoded)
-        # FastMCP handles base64 encoding internally when serializing to JSON
-        if isinstance(self.data, str):
-            # Data is a base64-encoded string, decode it to get raw image bytes
-            # Handle data URI format (data:image/png;base64,...)
-            if self.data.startswith("data:"):
-                # Extract base64 part from data URI
-                base64_data = self.data.split(",", 1)[1]
-            else:
-                # Assume it's already base64 string
-                base64_data = self.data
-            
-            # Strip whitespace and newlines from base64 string
-            base64_data = base64_data.strip().replace('\n', '').replace('\r', '').replace(' ', '')
-            
-            # Add padding if needed (base64 strings must be multiple of 4)
-            missing_padding = len(base64_data) % 4
-            if missing_padding:
-                base64_data += '=' * (4 - missing_padding)
-            
-            # Decode base64 string to raw image bytes
-            try:
-                data_bytes = base64.b64decode(base64_data, validate=True)
-            except Exception as e:
-                raise ValueError(f"Failed to decode base64 image data: {str(e)}")
-        else:
-            # Assume it's already raw image bytes
-            data_bytes = self.data
-        
-        # Create Image object with raw image bytes (FastMCP handles base64 encoding internally)
-        return Image(data=data_bytes, format=self.format)
 
 
 class MCPTransport(str, Enum):
@@ -82,11 +29,13 @@ class ServerSettings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     transport: MCPTransport = MCPTransport.stdio
+    log_level: str = "INFO"
 
 
 settings = ServerSettings()
+logging.basicConfig(level=settings.log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 mcp = FastMCP("comfyui", host=settings.host, port=settings.port, stateless_http=True)
-logger.info("Initializing ComfyUI client...")
 comfyui_client = ComfyUI()
 
 def extract_image_urls(images: dict) -> list[str]:
@@ -221,37 +170,27 @@ def download_single_image(url: str, target_directory: str, filename: Optional[st
 
 
 @mcp.tool()
-async def download_image(image_url: str, target_directory: str, filename: Optional[str] = None) -> Image:
-    """Download a single image from a URL and save it to the target directory. Returns Image object for preview.
-    
-    Args:
-        image_url: The URL of the image to download.
-        target_directory: Required. Full local file path (not relative) to a directory where the image will be saved. Generated files can be found there.
-        filename: Optional filename for the downloaded image. If not provided, a timestamped filename will be generated automatically.
-    
-    Returns:
-        Image: Image object for preview. The image file is saved to the target directory.
-    """
+async def download_image(
+        image_url: Annotated[str, Field(description="ComfyUI Download URL")],
+        target_directory: Annotated[str, Field(description="Full local file path (not relative) to a directory where the image will be saved. Generated files can be found there.")],
+        filename: Annotated[Optional[str], Field(description="Optional filename for the downloaded image. If not provided, a timestamped filename will be generated automatically")] = None
+) -> Image:
+    """Download a single image from a URL and save it to the target directory. Returns Image object for preview."""
     logger.info(f"download_image called with image_url='{image_url}', target_directory={target_directory}, filename={filename}")
     return download_single_image(image_url, target_directory, filename)
 
 
 @mcp.tool()
-async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: Optional[float] = None, denoise: Optional[float] = None, width: Optional[int] = None, height: Optional[int] = None) -> list[str]:
-    """Generate an image from a prompt. Returns ComfyUI download URLs for the generated images. Use the download_image tool to download and save the images.
-    
-    Args:
-        prompt: The prompt to generate the image from.  Uses natural language prompt.
-        seed: Optional integer seed to use for the image generation.
-        steps: Optional integer number of steps to use for the image generation.
-        cfg: Optional float CFG scale to use for the image generation.
-        denoise: Optional float denoise strength to use for the image generation.
-        width: Optional integer width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
-        height: Optional integer height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
-    
-    Returns:
-        list[str]: List of ComfyUI download URLs for the generated images. Use the download_image tool to download and save these images.
-    """
+async def text_to_image(
+        prompt: Annotated[str, Field(description="prompt to generate the image from (uses natural language prompt)")] = "",
+        seed: Annotated[Optional[int], Field(description="Optional integer seed to use for the image generation")] = None,
+        steps: Annotated[Optional[int], Field(description="Optional integer number of steps to use for the image generation")] = None,
+        cfg: Annotated[Optional[float], Field(description="Optional float CFG scale to use for the image generation.")] = None,
+        denoise: Annotated[Optional[float], Field(description="Optional float denoise strength to use for the image generation.")] = None,
+        width: Annotated[Optional[int], Field(description="Optional integer width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = None,
+        height: Annotated[Optional[int], Field(description="Optional integer height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = None,
+) -> list[str]:
+    """Generate an image from a prompt. Returns ComfyUI download URLs for the generated images. Use the `download_image` tool to download and save the images."""
     logger.info(f"text_to_image called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, denoise={denoise}, width={width}, height={height}")
     
     params = {"prompt": prompt}
@@ -283,21 +222,16 @@ async def text_to_image(prompt: str = "", seed: Optional[int] = None, steps: Opt
 
 
 @mcp.tool()
-async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: Optional[float] = None, denoise: Optional[float] = None, width: Optional[int] = None, height: Optional[int] = None) -> list[str]:
-    """Generate a placeholder image from a prompt. Optimized for quick placeholder generation. Returns ComfyUI download URLs for the generated images. Use the download_image tool to download and save the images.
-    
-    Args:
-        prompt: The prompt to generate the placeholder image from. Uses comma separated tags such as "dog, walking, sunset"
-        seed: Optional integer seed to use for the image generation.
-        steps: Optional integer number of steps to use for the image generation.
-        cfg: Optional float CFG scale to use for the image generation.
-        denoise: Optional float denoise strength to use for the image generation.
-        width: Optional integer width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
-        height: Optional integer height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).
-    
-    Returns:
-        list[str]: List of ComfyUI download URLs for the generated placeholder images. Use the download_image tool to download and save these images.
-    """
+async def text_to_image_placeholder(
+        prompt: Annotated[str, Field(description="prompt to generate the image from (Uses comma separated tags such as \"dog, walking, sunset\")")] = "",
+        seed: Annotated[Optional[int], Field(description="Optional integer seed to use for the image generation")] = None,
+        steps: Annotated[Optional[int], Field(description="Optional integer number of steps to use for the image generation")] = None,
+        cfg: Annotated[Optional[float], Field(description="Optional float CFG scale to use for the image generation.")] = None,
+        denoise: Annotated[Optional[float], Field(description="Optional float denoise strength to use for the image generation.")] = None,
+        width: Annotated[Optional[int], Field(description="Optional integer width of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = None,
+        height: Annotated[Optional[int], Field(description="Optional integer height of the generated image in pixels. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = None,
+) -> list[str]:
+    """Generate a placeholder image from a prompt. Optimized for quick placeholder generation. Returns ComfyUI download URLs for the generated images. Use the `download_image` tool to download and save the images."""
     logger.info(f"text_to_image_placeholder called with prompt='{prompt[:50]}...', seed={seed}, steps={steps}, cfg={cfg}, denoise={denoise}, width={width}, height={height}")
     
     params = {"prompt": prompt}
@@ -328,15 +262,8 @@ async def text_to_image_placeholder(prompt: str = "", seed: Optional[int] = None
     return extracted
 
 
-def extract_filename_from_url(url: str) -> str:
-    """Extract filename from a ComfyUI download URL.
-    
-    Args:
-        url: ComfyUI download URL (e.g., "http://localhost:8188/view?filename=ComfyUI_00115_.png&subfolder=&type=output")
-    
-    Returns:
-        str: Filename extracted from URL (e.g., "ComfyUI_00115_.png")
-    """
+def extract_filename_from_url(url: Annotated[str, Field(description="ComfyUI Download URL")]) -> str:
+    """Extract filename from a ComfyUI download URL.  Returns filename extracted from URL"""
     parsed_url = urllib.parse.urlparse(url)
     query_params = urllib.parse.parse_qs(parsed_url.query)
     filename = query_params.get('filename', [''])[0]
@@ -348,7 +275,7 @@ def extract_filename_from_url(url: str) -> str:
 @mcp.tool()
 async def edit_image(image: str, prompt: str = "", seed: Optional[int] = None, steps: Optional[int] = None, cfg: Optional[float] = None, denoise: Optional[float] = None, width: Optional[int] = None, height: Optional[int] = None) -> list[str]:
     """Edit an image using a prompt. The image must already exist on the ComfyUI server (from a previous generation). Returns ComfyUI download URLs for the edited images. Use the download_image tool to download and save the images.
-    
+
     Args:
         image: Filename of an image already on the ComfyUI server (e.g., "ComfyUI_00115_.png") or a download URL from which the filename will be extracted.
         prompt: The prompt to guide the image editing. Uses natural language prompt in the form of requests for changes (ex: "Change the person's hair color to blonde")
@@ -358,7 +285,7 @@ async def edit_image(image: str, prompt: str = "", seed: Optional[int] = None, s
         denoise: Optional float denoise strength to use for the image generation.
         width: Optional integer target width of the generated image in pixels.
         height: Optional integer target height of the generated image in pixels.
-    
+
     Returns:
         list[str]: List of ComfyUI download URLs for the edited images. Use the download_image tool to download and save these images.
     """
@@ -372,10 +299,10 @@ async def edit_image(image: str, prompt: str = "", seed: Optional[int] = None, s
     else:
         filename = image
         logger.info(f"Using provided filename: {filename}")
-    
+
     # Format filename for LoadImageOutput node: "filename [output]"
     image_reference = f"{filename} [output]"
-    
+
     params = {
         "prompt": prompt,
         "image": image_reference,  # Pass image reference for LoadImageOutput node
@@ -395,13 +322,13 @@ async def edit_image(image: str, prompt: str = "", seed: Optional[int] = None, s
     logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', cfg={cfg}, denoise={denoise}, width={width}, height={height}, image='{image_reference}'")
     workflow_images = await comfyui_client.process_workflow("edit_image", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
-    
+
     extracted = extract_image_urls(workflow_images)
     logger.info(f"edit_image: Extracted {len(extracted)} URL(s)")
-    
+
     if not extracted:
         raise ValueError("No images were generated")
-    
+
     logger.info(f"Returning {len(extracted)} download URL(s)")
     return extracted
 
@@ -417,20 +344,20 @@ async def run_workflow_from_file(file_path: str = "") -> list[str]:
         list[str]: List of ComfyUI download URLs for the generated images. Use the download_image tool to download and save these images.
     """
     logger.info(f"run_workflow_from_file called with file_path='{file_path}'")
-    
+
     with open(file_path, "r", encoding="utf-8") as f:
         workflow = json.load(f)
 
     logger.info(f"Loaded workflow from file, processing...")
     images = await comfyui_client.process_workflow(workflow, {}, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(images)} node(s)")
-    
+
     extracted = extract_image_urls(images)
     logger.info(f"run_workflow_from_file: Extracted {len(extracted)} URL(s)")
-    
+
     if not extracted:
         raise ValueError("No images were generated")
-    
+
     logger.info(f"Returning {len(extracted)} download URL(s)")
     return extracted
 
@@ -446,20 +373,20 @@ async def run_workflow_from_json(json_data: Optional[dict] = None) -> list[str]:
         list[str]: List of ComfyUI download URLs for the generated images. Use the download_image tool to download and save these images.
     """
     logger.info(f"run_workflow_from_json called with json_data={'provided' if json_data else 'None'}")
-    
+
     if json_data is None:
         json_data = {}
 
     logger.info(f"Processing workflow from JSON...")
     images = await comfyui_client.process_workflow(json_data, {}, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(images)} node(s)")
-    
+
     extracted = extract_image_urls(images)
     logger.info(f"run_workflow_from_json: Extracted {len(extracted)} URL(s)")
-    
+
     if not extracted:
         raise ValueError("No images were generated")
-    
+
     logger.info(f"Returning {len(extracted)} download URL(s)")
     return extracted
 
