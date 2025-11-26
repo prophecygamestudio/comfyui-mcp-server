@@ -293,8 +293,7 @@ async def tags_to_image(
             description="pixel width of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
         height: Annotated[int, Field(
             description="pixel height of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
-        save_path: Annotated[Optional[str], Field(
-            description="Optional path to save the image. Can be a directory path or a full file path. If not provided, the image will not be saved.")] = None,
+        save_path: Annotated[Optional[str], Field(description="Absolute path to save the image at. If not provided, the image will not be saved.")] = None,
 ) -> Image:
     """Quickly generate an image from a list of tags, and save it. Returns the image."""
     seed = random.randint(0, 2 ** 32 - 1)
@@ -315,7 +314,7 @@ async def text_to_image(
         prompt: Annotated[str, Field(description="prompt to generate the image from (uses natural language prompt)")] = "",
         width: Annotated[int, Field(description="pixel width of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
         height: Annotated[int, Field(description="pixel height of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
-        save_path: Annotated[Optional[str], Field(description="Optional path to save the image. Can be a directory path or a full file path. If not provided, the image will not be saved.")] = None,
+        save_path: Annotated[Optional[str], Field(description="Absolute path to save the image at. If not provided, the image will not be saved.")] = None,
 ) -> Image:
     """Slowly generate an image from a natural language prompt, and save it. Returns the generated image."""
     seed = random.randint(0, 2**32 - 1)
@@ -346,7 +345,7 @@ async def edit_image(
         prompt: Annotated[str, Field(description="The prompt to guide the image editing. Uses natural language prompt in the form of requests for changes (ex: \"Change the person's hair color to blonde\")")] = "",
         width: Annotated[int, Field(description="target pixel width of the edited image.")] = 1024,
         height: Annotated[int, Field(description="target pixel height of the edited image.")] = 1024,
-        save_path: Annotated[Optional[str], Field(description="Optional path to save the image. Can be a directory path or a full file path. If not provided, the image will not be saved.")] = None,
+        save_path: Annotated[Optional[str], Field(description="Absolute path to save the image at. If not provided, the image will not be saved.")] = None,
 ) -> Image:
     """Edit an image using a prompt. The image must already exist on the ComfyUI server (from a previous generation). Returns the generated image."""
     if not image:
@@ -383,7 +382,7 @@ async def edit_image(
 @mcp.tool(enabled=False)
 async def run_workflow_from_file(
         file_path: Annotated[str, Field(description="The absolute path to the file to run.")] = "",
-        save_path: Annotated[Optional[str], Field(description="Optional path to save the image(s). Can be a directory path or a full file path. If directory and multiple images are generated, each will be saved with a unique filename. If not provided, the images will not be saved.")] = None,
+        save_path: Annotated[Optional[str], Field(description="Absolulte path to save the image(s). Can be a directory path or a full file path. If directory and multiple images are generated, each will be saved with a unique filename. If not provided, the images will not be saved.")] = None,
 ) -> list[Image]:
     """Run a workflow from a file. Returns the generated image(s)."""
     logger.info(f"run_workflow_from_file called with file_path='{file_path}', save_path={save_path}")
@@ -401,7 +400,7 @@ async def run_workflow_from_file(
 @mcp.tool(enabled=False)
 async def run_workflow_from_json(
         json_data: Annotated[Optional[dict], Field(description="The JSON workflow to run.")] = None,
-        save_path: Annotated[Optional[str], Field(description="Optional path to save the image(s). Can be a directory path or a full file path. If directory and multiple images are generated, each will be saved with a unique filename. If not provided, the images will not be saved.")] = None,
+        save_path: Annotated[Optional[str], Field(description="Absolute path to save the image(s). Can be a directory path or a full file path. If directory and multiple images are generated, each will be saved with a unique filename. If not provided, the images will not be saved.")] = None,
 ) -> list[Image]:
     """Run a workflow from JSON data. Returns the generated image(s)."""
     logger.info(f"run_workflow_from_json called with json_data={'provided' if json_data else 'None'}, save_path={save_path}")
