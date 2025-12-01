@@ -317,38 +317,104 @@ def extract_filename_from_url(url: Annotated[str, Field(description="ComfyUI Dow
 
 @mcp.tool()
 async def edit_image(
-        image: Annotated[str, Field(description="Filename of an image already on the ComfyUI server (e.g., \"ComfyUI_00115_.png\") or a download URL from which the filename will be extracted.")],
+        image: Annotated[str, Field(description="Absolute path to an image file to edit.")],
         prompt: Annotated[str, Field(description="The prompt to guide the image editing. Uses natural language prompt in the form of requests for changes (ex: \"Change the person's hair color to blonde\")")] = "",
         width: Annotated[int, Field(description="target pixel width of the edited image.")] = 1024,
         height: Annotated[int, Field(description="target pixel height of the edited image.")] = 1024,
         save_path: Annotated[Optional[str], Field(description="Absolute path to save the image at. If not provided, the image will not be saved.")] = None,
 ) -> Image:
-    """Edit an image using a prompt. The image must already exist on the ComfyUI server (from a previous generation). Returns the generated image."""
+    """Edit an image using a prompt. Returns the generated image."""
     if not image:
         raise ValueError("image parameter is required")
     
     seed = random.randint(0, 2**32 - 1)
     logger.info(f"edit_image called with image='{image}', prompt='{prompt[:50]}...', seed={seed}, width={width}, height={height}, save_path={save_path}")
     
-    # Extract filename from URL if it's a URL, otherwise use it as-is
-    if image.startswith("http://") or image.startswith("https://"):
-        filename = extract_filename_from_url(image)
-        logger.info(f"Extracted filename '{filename}' from URL: {image}")
+    # Validate that the image file exists
+    image_path = Path(image)
+    if not image_path.exists():
+        raise FileNotFoundError(f"Image file not found: {image}")
+    if not image_path.is_file():
+        raise ValueError(f"Path is not a file: {image}")
+    
+    # Read the image file
+    logger.info(f"Reading image file from {image_path.absolute()}")
+    try:
+        with open(image_path, 'rb') as f:
+            image_bytes = f.read()
+        logger.info(f"Read {len(image_bytes)} bytes from image file")
+    except Exception as e:
+        logger.error(f"Failed to read image file: {str(e)}", exc_info=True)
+        raise ValueError(f"Failed to read image file: {str(e)}")
+    
+    # Generate a unique filename to avoid conflicts
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    random_suffix = random.randint(1000, 9999)
+    
+    # Get the original filename or generate one
+    original_filename = image_path.name
+    if not original_filename or not image_path.suffix:
+        # Generate a filename if the original doesn't have one
+        ext = 'png'  # default extension
+        original_filename = f"image_{timestamp}.{ext}"
     else:
-        filename = image
-        logger.info(f"Using provided filename: {filename}")
-
-    # Format filename for LoadImageOutput node: "filename [output]"
-    image_reference = f"{filename} [output]"
-
+        # Add timestamp to filename to make it unique
+        name_parts = original_filename.rsplit('.', 1)
+        if len(name_parts) == 2:
+            original_filename = f"{name_parts[0]}_{timestamp}_{random_suffix}.{name_parts[1]}"
+        else:
+            original_filename = f"{original_filename}_{timestamp}_{random_suffix}"
+    
+    # Try uploading without subfolder first (simpler, more reliable)
+    # ComfyUI LoadImage nodes work better with images in the root input folder
+    unique_subfolder = ""  # Upload to root input folder
+    
+    logger.info(f"Uploading image to ComfyUI server with filename '{original_filename}' (no subfolder)")
+    
+    # Upload the image to ComfyUI server
+    try:
+        upload_result = comfyui_client.upload_image(
+            image_bytes=image_bytes,
+            filename=original_filename,
+            upload_type="input",
+            subfolder=unique_subfolder  # Empty string = root folder
+        )
+        logger.info(f"Image uploaded successfully: {upload_result}")
+        # Log the upload result details for debugging
+        logger.info(f"Upload result details: name='{upload_result.get('name', 'NOT SET')}', subfolder='{upload_result.get('subfolder', 'NOT SET')}', type='{upload_result.get('type', 'NOT SET')}'")
+    except Exception as e:
+        logger.error(f"Failed to upload image to ComfyUI server: {str(e)}", exc_info=True)
+        raise ValueError(f"Failed to upload image to ComfyUI server: {str(e)}")
+    
+    # Ensure subfolder is set in upload_result if we uploaded with one
+    if unique_subfolder and "subfolder" not in upload_result:
+        upload_result["subfolder"] = unique_subfolder
+        logger.info(f"Added subfolder '{unique_subfolder}' to upload_result (was missing)")
+    elif unique_subfolder and not upload_result.get("subfolder"):
+        upload_result["subfolder"] = unique_subfolder
+        logger.info(f"Set subfolder '{unique_subfolder}' in upload_result (was empty)")
+    
+    # Final verification that subfolder is set
+    if unique_subfolder:
+        if "subfolder" not in upload_result or not upload_result.get("subfolder"):
+            upload_result["subfolder"] = unique_subfolder
+            logger.warning(f"Force-set subfolder '{unique_subfolder}' in upload_result (final check)")
+    
+    # Prepare parameters for the workflow
+    # The workflow uses LoadImage node which accepts uploaded_image parameter
     params = {
         "prompt": prompt,
-        "image": image_reference,  # Pass image reference for LoadImageOutput node
+        "uploaded_image": upload_result,  # Pass upload result for LoadImage node
         "width": width,
         "height": height,
         "seed": seed,
     }
-    logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', width={width}, height={height}, image='{image_reference}'")
+    # Also pass the subfolder separately as a fallback in case upload_result doesn't have it
+    if unique_subfolder:
+        params["uploaded_image_subfolder"] = unique_subfolder
+    logger.info(f"Processing workflow 'edit_image' with params: prompt='{prompt[:50]}...', width={width}, height={height}")
+    logger.info(f"uploaded_image param: {upload_result}")
+    logger.info(f"uploaded_image name='{upload_result.get('name', 'unknown')}', subfolder='{upload_result.get('subfolder', 'NOT SET')}'")
     workflow_images = await comfyui_client.process_workflow("edit_image", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
 
