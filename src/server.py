@@ -286,44 +286,20 @@ def handle_images_response(images: dict, save_path: Optional[str] = None) -> lis
 
 
 @mcp.tool()
-async def tags_to_image(
-        tags: Annotated[str, Field(
-            description="comma separated tags (e.g. \"dog, walking, sunset\")")] = "",
-        width: Annotated[int, Field(
-            description="pixel width of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
-        height: Annotated[int, Field(
-            description="pixel height of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
-        save_path: Annotated[Optional[str], Field(description="Absolute path to save the image at. If not provided, the image will not be saved.")] = None,
-) -> Image:
-    """Quickly generate an image from a list of tags, and save it. Returns the image."""
-    seed = random.randint(0, 2 ** 32 - 1)
-    logger.info(
-        f"text_to_image_placeholder called with prompt='{tags[:50]}...', seed={seed}, width={width}, height={height}, save_path={save_path}")
-
-    params = {"prompt": tags, "width": width, "height": height, "seed": seed}
-
-    logger.info(f"Processing workflow 'text_to_image_placeholder' with params: {params}")
-    workflow_images = await comfyui_client.process_workflow("text_to_image_placeholder", params, return_url=True)
-    logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
-
-    return handle_image_response(workflow_images, save_path)
-
-
-@mcp.tool()
 async def text_to_image(
         prompt: Annotated[str, Field(description="prompt to generate the image from (uses natural language prompt)")] = "",
         width: Annotated[int, Field(description="pixel width of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
         height: Annotated[int, Field(description="pixel height of the image. Best results are at approximately 1 megapixel (e.g., 1024x1024).")] = 1024,
         save_path: Annotated[Optional[str], Field(description="Absolute path to save the image at. If not provided, the image will not be saved.")] = None,
 ) -> Image:
-    """Slowly generate an image from a natural language prompt, and save it. Returns the generated image."""
+    """Generate an image from a natural language prompt, and save it. Returns the generated image."""
     seed = random.randint(0, 2**32 - 1)
     logger.info(f"text_to_image called with prompt='{prompt[:50]}...', seed={seed}, width={width}, height={height}, save_path={save_path}")
     
     params = {"prompt": prompt, "width": width, "height": height, "seed": seed}
     
     logger.info(f"Processing workflow 'text_to_image' with params: {params}")
-    images = await comfyui_client.process_workflow("text_to_image", params, return_url=True)
+    images = await comfyui_client.process_workflow("text_to_image_zimage", params, return_url=True)
     logger.info(f"Workflow completed, received images dict with {len(images)} node(s)")
     
     return handle_image_response(images, save_path)
