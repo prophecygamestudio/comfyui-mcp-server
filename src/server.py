@@ -79,6 +79,46 @@ def extract_image_urls(images: dict) -> list[str]:
     return result
 
 
+def extract_file_urls(images: dict) -> list[str]:
+    """Extract file URLs from a workflow result (for non-image files like GLB).
+
+    Args:
+        images: Dictionary mapping node IDs to lists of file URLs.
+
+    Returns:
+        list[str]: List of ComfyUI download URLs for the generated files.
+    """
+    logger.info(f"extract_file_urls called with {len(images)} node(s) containing files")
+    
+    if not images:
+        logger.error("No files were generated - images dict is empty")
+        raise ValueError("No files were generated")
+
+    result = []
+    total_files = 0
+    
+    for node_id, url_list in images.items():
+        logger.info(f"Processing node {node_id} with {len(url_list) if url_list else 0} URL(s)")
+        
+        if not url_list:
+            logger.warning(f"Node {node_id} has empty URL list, skipping")
+            continue
+
+        for idx, url in enumerate(url_list):
+            total_files += 1
+            logger.info(f"Processing URL {total_files} from node {node_id} (index {idx}): {url}")
+            
+            # Validate URL
+            if not url or not isinstance(url, str):
+                logger.error(f"URL {total_files} from node {node_id} is empty or invalid")
+                raise ValueError("File URL is empty or invalid")
+            
+            result.append(url)
+    
+    logger.info(f"extract_file_urls: Successfully extracted {len(result)} URL(s) from {total_files} total files")
+    return result
+
+
 def download_image_from_url(url: str) -> tuple[bytes, str]:
     """Download an image from a URL and return the image bytes and format.
     
@@ -127,6 +167,45 @@ def download_image_from_url(url: str) -> tuple[bytes, str]:
         
     except Exception as e:
         logger.error(f"Failed to download image from {url}: {str(e)}", exc_info=True)
+        raise
+
+
+def download_file_from_url(url: str) -> tuple[bytes, str]:
+    """Download a file from a URL and return the file bytes and filename.
+    
+    Args:
+        url: File URL to download.
+    
+    Returns:
+        tuple[bytes, str]: File bytes and filename.
+    """
+    if not url:
+        raise ValueError("File URL is required")
+    
+    logger.info(f"Downloading file from {url}")
+    
+    try:
+        # Download file
+        req = urllib.request.Request(url)
+        if comfyui_client.settings.authentication:
+            req.add_header("Authorization", comfyui_client.settings.authentication)
+        
+        with urllib.request.urlopen(req) as response:
+            file_bytes = response.read()
+            logger.info(f"Downloaded {len(file_bytes)} bytes")
+        
+        # Extract filename from URL
+        parsed_url = urllib.parse.urlparse(url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        
+        filename = query_params.get('filename', ['file'])[0]
+        if not filename:
+            filename = 'file'
+        
+        return file_bytes, filename
+        
+    except Exception as e:
+        logger.error(f"Failed to download file from {url}: {str(e)}", exc_info=True)
         raise
 
 
@@ -419,6 +498,116 @@ async def edit_image(
     logger.info(f"Workflow completed, received images dict with {len(workflow_images)} node(s)")
 
     return handle_image_response(workflow_images, save_path)
+
+
+@mcp.tool()
+async def text_to_model(
+        prompt: Annotated[str, Field(description="prompt to generate the 3D model from (uses natural language prompt)")] = "",
+        negative_prompt: Annotated[str, Field(description="negative prompt to guide what should not be in the model")] = "",
+        width: Annotated[int, Field(description="pixel width for the intermediate image generation step")] = 1328,
+        height: Annotated[int, Field(description="pixel height for the intermediate image generation step")] = 1328,
+        seed: Annotated[Optional[int], Field(description="random seed for generation. If not provided, a random seed will be used.")] = None,
+        steps: Annotated[int, Field(description="number of sampling steps for the 3D model generation")] = 20,
+        cfg: Annotated[float, Field(description="CFG scale for the 3D model generation. Recommended between 4 and 8.")] = 6.0,
+        save_path: Annotated[Optional[str], Field(description="Absolute path to save the generated 3D model (GLB file) at. If not provided, the model will not be saved locally.")] = None,
+) -> str:
+    """Generate a 3D model from a text prompt using Hunyuan3D v2. The workflow first generates an image from text, then uses that image to condition 3D model generation. Returns the URL or path to the generated GLB model file."""
+    if seed is None:
+        seed = random.randint(0, 2**32 - 1)
+    
+    logger.info(f"text_to_model called with prompt='{prompt[:50]}...', negative_prompt='{negative_prompt[:50] if negative_prompt else 'None'}...', seed={seed}, steps={steps}, cfg={cfg}, width={width}, height={height}, save_path={save_path}")
+    
+    params = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "width": width,
+        "height": height,
+        "seed": seed,
+        "steps": steps,
+        "cfg": cfg,
+    }
+    
+    logger.info(f"Processing workflow 'text_to_model' with params: {list(params.keys())}")
+    workflow_outputs = await comfyui_client.process_workflow("text_to_model_hunyuan2.1", params, return_url=True)
+    logger.info(f"Workflow completed, received outputs dict with {len(workflow_outputs)} node(s)")
+    
+    # The workflow generates both an intermediate image and a 3D model (GLB file)
+    # Extract file URLs (GLB files from SaveGLB nodes) and image URLs (intermediate step)
+    file_urls = []
+    image_urls = []
+    all_urls = []
+    
+    if workflow_outputs:
+        # Collect all URLs from all nodes
+        for node_id, url_list in workflow_outputs.items():
+            if url_list:
+                all_urls.extend(url_list)
+        
+        # Separate URLs into files (GLB) and images based on URL parameters
+        for url in all_urls:
+            try:
+                parsed_url = urllib.parse.urlparse(url)
+                query_params = urllib.parse.parse_qs(parsed_url.query)
+                filename = query_params.get('filename', [''])[0]
+                
+                # Check if it's a GLB file based on extension
+                if filename.lower().endswith('.glb'):
+                    file_urls.append(url)
+                    logger.info(f"Identified GLB file URL: {url}")
+                else:
+                    # Assume it's an image
+                    image_urls.append(url)
+                    logger.info(f"Identified image URL: {url}")
+            except Exception as e:
+                logger.warning(f"Could not parse URL {url}: {str(e)}")
+                # Default to treating as image if we can't determine
+                image_urls.append(url)
+        
+        logger.info(f"Found {len(file_urls)} GLB file URL(s) and {len(image_urls)} image URL(s)")
+    
+    # Build result message
+    result_message = f"3D model generation completed. "
+    
+    if image_urls:
+        result_message += f"Intermediate image generated: {image_urls[0]}. "
+    
+    # Download GLB file if URLs are available and save_path is provided
+    if file_urls and save_path:
+        try:
+            logger.info(f"Downloading GLB file from {file_urls[0]} to {save_path}")
+            file_bytes, filename = download_file_from_url(file_urls[0])
+            
+            # Determine final save path
+            save_path_obj = Path(save_path)
+            if save_path_obj.is_dir() or (not save_path_obj.exists() and not save_path_obj.suffix):
+                # It's a directory, use the filename from the URL
+                save_path_obj.mkdir(parents=True, exist_ok=True)
+                final_path = save_path_obj / filename
+            else:
+                # It's a file path
+                final_path = save_path_obj
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Save the file
+            with open(final_path, 'wb') as f:
+                f.write(file_bytes)
+            
+            logger.info(f"Saved GLB file to {final_path.absolute()}")
+            result_message += f"GLB file downloaded and saved to: {final_path.absolute()}"
+        except Exception as e:
+            logger.error(f"Failed to download GLB file: {str(e)}", exc_info=True)
+            result_message += f" Warning: Failed to download GLB file: {str(e)}. "
+            result_message += f"The GLB file is available in ComfyUI's output folder at: {file_urls[0] if file_urls else 'unknown location'}"
+    elif file_urls:
+        # File URLs available but no save_path provided
+        result_message += f"The 3D model (GLB file) is available at: {file_urls[0]}"
+    else:
+        # No file URLs found
+        result_message += "The 3D model (GLB file) has been saved to ComfyUI's output folder. "
+        result_message += "Check the ComfyUI output directory for the generated model file."
+    
+    logger.info(f"text_to_model: Returning result message")
+    return result_message
 
 
 @mcp.tool(enabled=False)
