@@ -81,6 +81,24 @@ class ComfyUI:
         req = urllib.request.Request(url, headers=self.headers)
         with urllib.request.urlopen(req) as response:
             return response.read()
+    
+    def get_file(self, filename, subfolder, folder_type):
+        """Download a file from ComfyUI server (similar to get_image but for any file type).
+        
+        Args:
+            filename: The filename of the file to download.
+            subfolder: The subfolder where the file is stored.
+            folder_type: The folder type (e.g., "output", "input", "temp").
+            
+        Returns:
+            bytes: The file data as bytes.
+        """
+        data = {"filename": filename, "subfolder": subfolder, "type": folder_type}
+        url_values = urllib.parse.urlencode(data)
+        url = f"{self.http_url}/view?{url_values}"
+        req = urllib.request.Request(url, headers=self.headers)
+        with urllib.request.urlopen(req) as response:
+            return response.read()
 
     def get_history(self, prompt_id):
         url = f"{self.http_url}/history/{prompt_id}"
@@ -445,8 +463,33 @@ class ComfyUI:
                         except Exception as e:
                             logger.error(f"Node {node_id}, image {idx + 1}: Failed to fetch image: {str(e)}", exc_info=True)
                             raise
+            elif "files" in node_output:
+                # Handle file outputs (e.g., GLB files from SaveGLB nodes)
+                file_list = node_output["files"]
+                logger.info(f"Node {node_id} has {len(file_list)} file(s)")
+                
+                if return_url:
+                    output_images[node_id] = []
+                    for idx, file_info in enumerate(file_list):
+                        data = {"filename": file_info["filename"], "subfolder": file_info.get("subfolder", ""), "type": file_info["type"]}
+                        url_values = urllib.parse.urlencode(data)
+                        url = f"{self.http_url}/view?{url_values}"
+                        output_images[node_id].append(url)
+                        logger.info(f"Node {node_id}, file {idx + 1}: Added URL {url}")
+                else:
+                    output_images[node_id] = []
+                    for idx, file_info in enumerate(file_list):
+                        logger.info(f"Node {node_id}, file {idx + 1}: Fetching file - filename='{file_info['filename']}', subfolder='{file_info.get('subfolder', '')}', type='{file_info['type']}'")
+                        try:
+                            file_bytes = self.get_file(file_info["filename"], file_info.get("subfolder", ""), file_info["type"])
+                            file_size = len(file_bytes) if file_bytes else 0
+                            logger.info(f"Node {node_id}, file {idx + 1}: Successfully fetched {file_size} bytes")
+                            output_images[node_id].append(file_bytes)
+                        except Exception as e:
+                            logger.error(f"Node {node_id}, file {idx + 1}: Failed to fetch file: {str(e)}", exc_info=True)
+                            raise
             else:
-                logger.warning(f"Node {node_id} has no 'images' key in output")
+                logger.warning(f"Node {node_id} has no 'images' or 'files' key in output")
 
         total_images = sum(len(images) for images in output_images.values())
         logger.info(f"get_images: Successfully retrieved {total_images} total image(s) from {len(output_images)} node(s)")
