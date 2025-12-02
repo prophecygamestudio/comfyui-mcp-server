@@ -130,7 +130,7 @@ class ComfyUI:
             # Log the workflow that caused the error for debugging
             logger.error(f"HTTP {e.code} error queueing prompt: {e.reason}")
             logger.error(f"Error response: {error_body}")
-            logger.error(f"Workflow JSON (first 1000 chars): {json.dumps(prompt, indent=2)[:1000]}")
+            logger.error(f"Workflow JSON:\n{json.dumps(prompt, indent=2)}")
             
             raise ValueError(f"Failed to queue prompt to ComfyUI server: HTTP {e.code} {e.reason}. {error_body}")
         except Exception as e:
@@ -367,9 +367,9 @@ class ComfyUI:
                 if not image_name:
                     raise ValueError(f"LoadImage node {node_id} has no image set. Cannot queue workflow.")
         
-        # Log the complete workflow JSON for debugging (first 2000 chars)
+        # Log the complete workflow JSON for debugging
         workflow_json = json.dumps(prompt, indent=2)
-        logger.info(f"Complete workflow JSON (first 2000 chars):\n{workflow_json[:2000]}")
+        logger.info(f"Complete workflow JSON:\n{workflow_json}")
 
         logger.info(f"Connecting to WebSocket: {self.ws_url}")
         ws = websocket.WebSocket()
@@ -384,10 +384,10 @@ class ComfyUI:
             raise
 
         try:
-            logger.info("Starting image retrieval from workflow...")
-            images = self.get_images(ws, prompt, return_url)
-            logger.info(f"process_workflow: Returning images dict with {len(images)} node(s)")
-            return images
+            logger.info("Starting output retrieval from workflow...")
+            outputs = self.get_images(ws, prompt, return_url)
+            logger.info(f"process_workflow: Returning outputs dict with {len(outputs)} node(s)")
+            return outputs
         except Exception as e:
             logger.error(f"Error in process_workflow: {str(e)}", exc_info=True)
             raise
@@ -397,7 +397,12 @@ class ComfyUI:
             logger.info("WebSocket connection closed")
 
     def get_images(self, ws, prompt, return_url):
-        logger.info("Starting get_images: queueing prompt...")
+        """Get all outputs (images, files, etc.) from a workflow execution.
+        
+        This method is generic and handles any output type that ComfyUI returns,
+        including images, GLB files, and other file types.
+        """
+        logger.info("Starting get_outputs: queueing prompt...")
         queue_result = self.queue_prompt(prompt)
         prompt_id = queue_result["prompt_id"]
         logger.info(f"Prompt queued successfully, prompt_id: {prompt_id}")
@@ -439,60 +444,74 @@ class ComfyUI:
             node_output = history["outputs"][node_id]
             logger.info(f"Processing output node {node_id}, keys: {list(node_output.keys())}")
             
-            if "images" in node_output:
-                image_list = node_output["images"]
-                logger.info(f"Node {node_id} has {len(image_list)} image(s)")
+            # Process all output keys generically - handle images, files, or any other output type
+            output_items = []
+            output_key = None
+            
+            # Check for common output keys (images, files, etc.)
+            for key in ["images", "files", "output"]:
+                if key in node_output:
+                    output_items = node_output[key]
+                    output_key = key
+                    break
+            
+            # If no common key found, check all keys for list-like outputs
+            if not output_items:
+                for key, value in node_output.items():
+                    if isinstance(value, list) and len(value) > 0:
+                        # Check if items in list have file-like structure (filename, type, etc.)
+                        first_item = value[0]
+                        if isinstance(first_item, dict) and ("filename" in first_item or "name" in first_item):
+                            output_items = value
+                            output_key = key
+                            logger.info(f"Found output list in key '{key}' with {len(output_items)} item(s)")
+                            break
+            
+            if output_items and output_key:
+                logger.info(f"Node {node_id} has {len(output_items)} output item(s) in key '{output_key}'")
                 
                 if return_url:
                     output_images[node_id] = []
-                    for idx, image in enumerate(image_list):
-                        data = {"filename": image["filename"], "subfolder": image["subfolder"], "type": image["type"]}
-                        url_values = urllib.parse.urlencode(data)
-                        url = f"{self.http_url}/view?{url_values}"
-                        output_images[node_id].append(url)
-                        logger.info(f"Node {node_id}, image {idx + 1}: Added URL {url}")
+                    for idx, item in enumerate(output_items):
+                        # Handle different item structures
+                        filename = item.get("filename") or item.get("name", "")
+                        subfolder = item.get("subfolder", "")
+                        item_type = item.get("type", "output")
+                        
+                        if filename:
+                            data = {"filename": filename, "subfolder": subfolder, "type": item_type}
+                            url_values = urllib.parse.urlencode(data)
+                            url = f"{self.http_url}/view?{url_values}"
+                            output_images[node_id].append(url)
+                            logger.info(f"Node {node_id}, item {idx + 1} ({output_key}): Added URL {url}")
+                        else:
+                            logger.warning(f"Node {node_id}, item {idx + 1}: No filename found, skipping")
                 else:
                     output_images[node_id] = []
-                    for idx, image in enumerate(image_list):
-                        logger.info(f"Node {node_id}, image {idx + 1}: Fetching image - filename='{image['filename']}', subfolder='{image.get('subfolder', '')}', type='{image['type']}'")
-                        try:
-                            image_bytes = self.get_image(image["filename"], image["subfolder"], image["type"])
-                            image_size = len(image_bytes) if image_bytes else 0
-                            logger.info(f"Node {node_id}, image {idx + 1}: Successfully fetched {image_size} bytes")
-                            output_images[node_id].append(image_bytes)
-                        except Exception as e:
-                            logger.error(f"Node {node_id}, image {idx + 1}: Failed to fetch image: {str(e)}", exc_info=True)
-                            raise
-            elif "files" in node_output:
-                # Handle file outputs (e.g., GLB files from SaveGLB nodes)
-                file_list = node_output["files"]
-                logger.info(f"Node {node_id} has {len(file_list)} file(s)")
-                
-                if return_url:
-                    output_images[node_id] = []
-                    for idx, file_info in enumerate(file_list):
-                        data = {"filename": file_info["filename"], "subfolder": file_info.get("subfolder", ""), "type": file_info["type"]}
-                        url_values = urllib.parse.urlencode(data)
-                        url = f"{self.http_url}/view?{url_values}"
-                        output_images[node_id].append(url)
-                        logger.info(f"Node {node_id}, file {idx + 1}: Added URL {url}")
-                else:
-                    output_images[node_id] = []
-                    for idx, file_info in enumerate(file_list):
-                        logger.info(f"Node {node_id}, file {idx + 1}: Fetching file - filename='{file_info['filename']}', subfolder='{file_info.get('subfolder', '')}', type='{file_info['type']}'")
-                        try:
-                            file_bytes = self.get_file(file_info["filename"], file_info.get("subfolder", ""), file_info["type"])
-                            file_size = len(file_bytes) if file_bytes else 0
-                            logger.info(f"Node {node_id}, file {idx + 1}: Successfully fetched {file_size} bytes")
-                            output_images[node_id].append(file_bytes)
-                        except Exception as e:
-                            logger.error(f"Node {node_id}, file {idx + 1}: Failed to fetch file: {str(e)}", exc_info=True)
-                            raise
+                    for idx, item in enumerate(output_items):
+                        filename = item.get("filename") or item.get("name", "")
+                        subfolder = item.get("subfolder", "")
+                        item_type = item.get("type", "output")
+                        
+                        if filename:
+                            logger.info(f"Node {node_id}, item {idx + 1} ({output_key}): Fetching - filename='{filename}', subfolder='{subfolder}', type='{item_type}'")
+                            try:
+                                file_bytes = self.get_file(filename, subfolder, item_type)
+                                file_size = len(file_bytes) if file_bytes else 0
+                                logger.info(f"Node {node_id}, item {idx + 1}: Successfully fetched {file_size} bytes")
+                                output_images[node_id].append(file_bytes)
+                            except Exception as e:
+                                logger.error(f"Node {node_id}, item {idx + 1}: Failed to fetch file: {str(e)}", exc_info=True)
+                                raise
+                        else:
+                            logger.warning(f"Node {node_id}, item {idx + 1}: No filename found, skipping")
             else:
-                logger.warning(f"Node {node_id} has no 'images' or 'files' key in output")
+                logger.warning(f"Node {node_id} has no recognizable output format. Keys: {list(node_output.keys())}")
+                # Log the full output for debugging
+                logger.debug(f"Node {node_id} full output: {json.dumps(node_output, indent=2)}")
 
-        total_images = sum(len(images) for images in output_images.values())
-        logger.info(f"get_images: Successfully retrieved {total_images} total image(s) from {len(output_images)} node(s)")
+        total_outputs = sum(len(outputs) for outputs in output_images.values())
+        logger.info(f"get_images: Successfully retrieved {total_outputs} total output(s) from {len(output_images)} node(s)")
         return output_images
 
     def update_workflow_params(self, prompt, params):

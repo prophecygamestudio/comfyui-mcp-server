@@ -31,10 +31,45 @@ class ServerSettings(BaseSettings):
     port: int = 8000
     transport: MCPTransport = MCPTransport.stdio
     log_level: str = "INFO"
+    log_file: Optional[str] = None
+    log_format: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+
+def setup_logging(settings: ServerSettings):
+    """Configure logging based on settings."""
+    # Convert log_level string to logging level constant
+    numeric_level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter(settings.log_format)
+    
+    # Get root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(numeric_level)
+    
+    # Remove existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+    
+    # Add console handler (always)
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(numeric_level)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    
+    # Add file handler if log_file is specified
+    if settings.log_file:
+        # Ensure parent directory exists
+        log_path = Path(settings.log_file)
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        file_handler = logging.FileHandler(settings.log_file, encoding='utf-8')
+        file_handler.setLevel(numeric_level)
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
 
 
 settings = ServerSettings()
-logging.basicConfig(level=settings.log_level, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+setup_logging(settings)
 logger = logging.getLogger(__name__)
 mcp = FastMCP("comfyui", host=settings.host, port=settings.port, stateless_http=True)
 comfyui_client = ComfyUI()
@@ -504,27 +539,17 @@ async def edit_image(
 async def text_to_model(
         prompt: Annotated[str, Field(description="prompt to generate the 3D model from (uses natural language prompt)")] = "",
         negative_prompt: Annotated[str, Field(description="negative prompt to guide what should not be in the model")] = "",
-        width: Annotated[int, Field(description="pixel width for the intermediate image generation step")] = 1328,
-        height: Annotated[int, Field(description="pixel height for the intermediate image generation step")] = 1328,
-        seed: Annotated[Optional[int], Field(description="random seed for generation. If not provided, a random seed will be used.")] = None,
-        steps: Annotated[int, Field(description="number of sampling steps for the 3D model generation")] = 20,
-        cfg: Annotated[float, Field(description="CFG scale for the 3D model generation. Recommended between 4 and 8.")] = 6.0,
         save_path: Annotated[Optional[str], Field(description="Absolute path to save the generated 3D model (GLB file) at. If not provided, the model will not be saved locally.")] = None,
 ) -> str:
-    """Generate a 3D model from a text prompt using Hunyuan3D v2. The workflow first generates an image from text, then uses that image to condition 3D model generation. Returns the URL or path to the generated GLB model file."""
-    if seed is None:
-        seed = random.randint(0, 2**32 - 1)
-    
-    logger.info(f"text_to_model called with prompt='{prompt[:50]}...', negative_prompt='{negative_prompt[:50] if negative_prompt else 'None'}...', seed={seed}, steps={steps}, cfg={cfg}, width={width}, height={height}, save_path={save_path}")
-    
+    """Generate a 3D model from a text prompt. Returns the URL or path to the generated GLB model file."""
+    seed = random.randint(0, 2**32 - 1)
+    logger.info(f"text_to_model called with prompt='{prompt[:50]}...', negative_prompt='{negative_prompt[:50] if negative_prompt else 'None'}...', seed={seed}, save_path={save_path}")
     params = {
         "prompt": prompt,
         "negative_prompt": negative_prompt,
-        "width": width,
-        "height": height,
+        "width": 1024,
+        "height": 1024,
         "seed": seed,
-        "steps": steps,
-        "cfg": cfg,
     }
     
     logger.info(f"Processing workflow 'text_to_model' with params: {list(params.keys())}")
