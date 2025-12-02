@@ -285,7 +285,7 @@
   },
   "47": {
     "inputs": {
-      "value": 0
+      "value": 2841821480
     },
     "class_type": "PrimitiveInt",
     "_meta": {
@@ -312,7 +312,7 @@
   },
   "50": {
     "inputs": {
-      "value": ""
+      "value": "soda can with fries"
     },
     "class_type": "PrimitiveString",
     "_meta": {
